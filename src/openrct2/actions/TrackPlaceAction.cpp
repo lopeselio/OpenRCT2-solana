@@ -191,6 +191,9 @@ namespace OpenRCT2::GameActions
             }
             if (!MapIsLocationOwned(tileCoords) && !gameState.cheats.sandboxMode)
             {
+                LOG_INFO(
+                    "TrackPlaceAction ownership fail at (%d,%d,%d) for ride %u", tileCoords.x, tileCoords.y, tileCoords.z,
+                    _rideIndex.ToUnderlying());
                 return Result(Status::Disallowed, STR_RIDE_CONSTRUCTION_CANT_CONSTRUCT_THIS_HERE, STR_LAND_NOT_OWNED_BY_PARK);
             }
             numElements++;

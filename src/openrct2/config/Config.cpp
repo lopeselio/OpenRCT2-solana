@@ -631,6 +631,22 @@ namespace OpenRCT2::Config
         writer->WriteString("allowed_hosts", model->allowedHosts);
     }
 
+    static void ReadAIAgent(IIniReader* reader)
+    {
+        if (reader->ReadSection("aiagent"))
+        {
+            auto model = &_config.aiAgent;
+            model->followEnabled = reader->GetBoolean("follow_enabled", model->followEnabled);
+        }
+    }
+
+    static void WriteAIAgent(IIniWriter* writer)
+    {
+        const auto& model = _config.aiAgent;
+        writer->WriteSection("aiagent");
+        writer->WriteBoolean("follow_enabled", model.followEnabled);
+    }
+
     bool SetDefaults()
     {
         try
@@ -643,6 +659,7 @@ namespace OpenRCT2::Config
             ReadNotifications(reader.get());
             ReadFont(reader.get());
             ReadPlugin(reader.get());
+            ReadAIAgent(reader.get());
             return true;
         }
         catch (const std::exception&)
@@ -664,6 +681,7 @@ namespace OpenRCT2::Config
             ReadNotifications(reader.get());
             ReadFont(reader.get());
             ReadPlugin(reader.get());
+            ReadAIAgent(reader.get());
             return true;
         }
         catch (const std::exception&)
@@ -688,6 +706,7 @@ namespace OpenRCT2::Config
             WriteNotifications(writer.get());
             WriteFont(writer.get());
             WritePlugin(writer.get());
+            WriteAIAgent(writer.get());
             return true;
         }
         catch (const std::exception& ex)

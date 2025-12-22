@@ -232,6 +232,11 @@ namespace OpenRCT2::Config
         u8string allowedHosts;
     };
 
+    struct AIAgent
+    {
+        bool followEnabled = true;
+    };
+
     struct Config
     {
         Config() = default;
@@ -245,6 +250,7 @@ namespace OpenRCT2::Config
         Network network;
         Notification notifications;
         Font fonts;
+        AIAgent aiAgent;
         Plugin plugin;
     };
 

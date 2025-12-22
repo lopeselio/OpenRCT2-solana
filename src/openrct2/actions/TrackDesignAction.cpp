@@ -269,7 +269,10 @@ namespace OpenRCT2::GameActions
             r = ExecuteNested(&gameAction, gameState);
         }
         res.Cost = execRes.Cost;
-        res.SetData(RideId{ ride->id });
+        // Use rideIndex (from RideCreateAction result) rather than ride->id
+        // because the ride pointer could become stale if nested actions cause
+        // the rides array to be reallocated
+        res.SetData(RideId{ rideIndex });
 
         return res;
     }
