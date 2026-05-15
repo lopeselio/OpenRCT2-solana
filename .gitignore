@@ -1,0 +1,24 @@
+# Rust / Anchor
+target/
+.anchor/
+**/*.rs.bk
+
+# Node
+node_modules/
+dist/
+chain-sidecar/dist/
+
+# Solana
+test-ledger/
+*.so
+*.keypair
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# IDE / local
+.claude/
+.DS_Store
+*.swp
