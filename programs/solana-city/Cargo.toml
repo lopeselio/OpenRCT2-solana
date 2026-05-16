@@ -22,9 +22,9 @@ custom-panic = []
 
 [dependencies]
 anchor-lang = { version = "0.32.1", features = ["init-if-needed"] }
-ephemeral-rollups-sdk = { version = "0.6.5", features = ["anchor", "disable-realloc"] }
-ephemeral-vrf-sdk = { version = "0.2.1", features = ["anchor"] }
-magicblock-magic-program-api = { version = "0.3.1", default-features = false }
+ephemeral-rollups-sdk = { version = "0.11.1", features = ["anchor", "disable-realloc"] }
+ephemeral-vrf-sdk = { version = "0.2.3", features = ["anchor"] }
+magicblock-magic-program-api = { version = "0.8.5", default-features = false }
 bincode = "^1.3"
 
 
