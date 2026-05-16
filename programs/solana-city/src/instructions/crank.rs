@@ -29,9 +29,9 @@ pub fn schedule_park_crank(ctx: Context<ScheduleParkCrank>, args: ScheduleCrankA
     };
 
     let ix_data = bincode::serialize(&MagicBlockInstruction::ScheduleTask(ScheduleTaskArgs {
-        task_id: args.task_id,
-        execution_interval_millis: args.interval_millis,
-        iterations: args.iterations,
+        task_id: args.task_id as i64,
+        execution_interval_millis: args.interval_millis as i64,
+        iterations: args.iterations as i64,
         instructions: vec![tick_ix],
     }))
     .map_err(|_| anchor_lang::error::Error::from(anchor_lang::error::AnchorError {
