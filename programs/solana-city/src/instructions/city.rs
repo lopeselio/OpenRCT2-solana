@@ -1,5 +1,5 @@
 use anchor_lang::prelude::*;
-use crate::state::{CityState, Leaderboard};
+use crate::state::CityState;
 use crate::errors::CityError;
 
 pub fn initialize_city(ctx: Context<InitializeCity>, name: String) -> Result<()> {
