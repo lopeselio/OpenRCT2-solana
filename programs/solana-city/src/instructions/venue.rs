@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 use ephemeral_rollups_sdk::anchor::{commit, delegate};
 use ephemeral_rollups_sdk::cpi::DelegateConfig;
-use ephemeral_rollups_sdk::ephem::commit_and_undelegate_accounts;
+use ephemeral_rollups_sdk::ephem::{FoldableIntentBuilder, MagicIntentBundleBuilder};
 use crate::state::{CityState, VenueAccount};
 use crate::errors::CityError;
 
@@ -61,12 +61,13 @@ pub fn repair_venue(ctx: Context<RepairVenue>, _venue_id: u32) -> Result<()> {
 pub fn remove_venue(ctx: Context<RemoveVenue>) -> Result<()> {
     ctx.accounts.venue.is_active = false;
 
-    commit_and_undelegate_accounts(
-        &ctx.accounts.payer,
-        vec![&ctx.accounts.venue.to_account_info()],
-        &ctx.accounts.magic_context,
-        &ctx.accounts.magic_program,
-    )?;
+    MagicIntentBundleBuilder::new(
+        ctx.accounts.payer.to_account_info(),
+        ctx.accounts.magic_context.to_account_info(),
+        ctx.accounts.magic_program.to_account_info(),
+    )
+    .commit_and_undelegate(&[ctx.accounts.venue.to_account_info()])
+    .build_and_invoke()?;
 
     ctx.accounts.city.venue_count = ctx.accounts.city.venue_count.saturating_sub(1);
     msg!("Venue {} removed", ctx.accounts.venue.venue_id);
