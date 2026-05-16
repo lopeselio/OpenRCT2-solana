@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 use ephemeral_rollups_sdk::anchor::{commit, delegate};
 use ephemeral_rollups_sdk::cpi::DelegateConfig;
-use ephemeral_rollups_sdk::ephem::{commit_accounts, commit_and_undelegate_accounts};
+use ephemeral_rollups_sdk::ephem::{FoldableIntentBuilder, MagicIntentBundleBuilder};
 use crate::state::{CityState, GuestAccount, VenueAccount};
 use crate::errors::CityError;
 
@@ -79,12 +79,13 @@ pub fn claim_prize(ctx: Context<ClaimPrize>, _guest_id: u32) -> Result<()> {
 
 // Periodic mid-session commit — keeps base layer in sync — ephemeral rollup
 pub fn commit_guest(ctx: Context<CommitGuest>) -> Result<()> {
-    commit_accounts(
-        &ctx.accounts.payer,
-        vec![&ctx.accounts.guest.to_account_info()],
-        &ctx.accounts.magic_context,
-        &ctx.accounts.magic_program,
-    )?;
+    MagicIntentBundleBuilder::new(
+        ctx.accounts.payer.to_account_info(),
+        ctx.accounts.magic_context.to_account_info(),
+        ctx.accounts.magic_program.to_account_info(),
+    )
+    .commit(&[ctx.accounts.guest.to_account_info()])
+    .build_and_invoke()?;
     Ok(())
 }
 
@@ -92,12 +93,13 @@ pub fn commit_guest(ctx: Context<CommitGuest>) -> Result<()> {
 pub fn exit_guest(ctx: Context<ExitGuest>) -> Result<()> {
     ctx.accounts.guest.is_active = false;
 
-    commit_and_undelegate_accounts(
-        &ctx.accounts.payer,
-        vec![&ctx.accounts.guest.to_account_info()],
-        &ctx.accounts.magic_context,
-        &ctx.accounts.magic_program,
-    )?;
+    MagicIntentBundleBuilder::new(
+        ctx.accounts.payer.to_account_info(),
+        ctx.accounts.magic_context.to_account_info(),
+        ctx.accounts.magic_program.to_account_info(),
+    )
+    .commit_and_undelegate(&[ctx.accounts.guest.to_account_info()])
+    .build_and_invoke()?;
 
     msg!(
         "Guest {} exited. Spent: {} PARK. Remaining: {} PARK",
