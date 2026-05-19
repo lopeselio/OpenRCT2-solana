@@ -58,9 +58,11 @@ pub fn repair_venue(ctx: Context<RepairVenue>, _venue_id: u32) -> Result<()> {
 }
 
 // Remove a venue — commit final revenue + undelegate — ephemeral rollup
+//
+// Do NOT write to venue here — same ExternalAccountDataModified constraint as exit_guest.
+// The magic program revokes write permission during commit_and_undelegate; any data
+// modification in the same instruction fails end-of-instruction validation.
 pub fn remove_venue(ctx: Context<RemoveVenue>) -> Result<()> {
-    ctx.accounts.venue.is_active = false;
-
     MagicIntentBundleBuilder::new(
         ctx.accounts.payer.to_account_info(),
         ctx.accounts.magic_context.to_account_info(),
@@ -70,7 +72,7 @@ pub fn remove_venue(ctx: Context<RemoveVenue>) -> Result<()> {
     .build_and_invoke()?;
 
     ctx.accounts.city.venue_count = ctx.accounts.city.venue_count.saturating_sub(1);
-    msg!("Venue {} removed", ctx.accounts.venue.venue_id);
+    msg!("Venue removed — account will return to base layer");
     Ok(())
 }
 
@@ -128,8 +130,10 @@ pub struct RepairVenue<'info> {
 pub struct RemoveVenue<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
+    // AccountInfo (not Account<T>) — same reason as ExitGuest; see remove_venue docs.
+    /// CHECK: delegated venue PDA; verified by the caller via PDA derivation
     #[account(mut)]
-    pub venue: Account<'info, VenueAccount>,
+    pub venue: AccountInfo<'info>,
     #[account(mut, seeds = [b"city"], bump = city.bump)]
     pub city: Account<'info, CityState>,
 }
