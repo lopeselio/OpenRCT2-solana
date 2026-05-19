@@ -18,4 +18,8 @@ pub enum CityError {
     ZeroStakeAmount,
     #[msg("No staked position to withdraw")]
     NoStakeToWithdraw,
+    #[msg("Badge tier must be 0–3 (Bronze/Silver/Gold/Diamond)")]
+    InvalidBadgeTier,
+    #[msg("City has not yet reached the threshold for this badge")]
+    BadgeThresholdNotMet,
 }

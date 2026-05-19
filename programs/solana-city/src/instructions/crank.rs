@@ -20,8 +20,9 @@ pub struct ScheduleCrankArgs {
     pub iterations: u64,      // u64::MAX ≈ run forever
 }
 
-pub fn schedule_park_crank(ctx: Context<ScheduleParkCrank>, args: ScheduleCrankArgs) -> Result<()> {
-    // Build the instruction the crank will call (auto_park_tick)
+pub fn schedule_park_crank(ctx: Context<ScheduleParkCrank>, _park_id: u32, args: ScheduleCrankArgs) -> Result<()> {
+    // Build the instruction the crank will call (auto_park_tick).
+    // The city key is baked in at schedule-time so auto_park_tick knows which park to tick.
     let tick_ix = Instruction {
         program_id: crate::ID,
         accounts: vec![AccountMeta::new(ctx.accounts.city.key(), false)],
@@ -63,7 +64,9 @@ pub fn schedule_park_crank(ctx: Context<ScheduleParkCrank>, args: ScheduleCrankA
     Ok(())
 }
 
-// Called automatically every 30 seconds by the ER crank
+// Called automatically every 30 seconds by the ER crank.
+// The city key is baked into the crank schedule at schedule-time, so no seeds
+// constraint is needed here — Anchor verifies the account is a CityState via discriminator.
 pub fn auto_park_tick(ctx: Context<AutoParkTick>) -> Result<()> {
     let city = &mut ctx.accounts.city;
 
@@ -73,7 +76,8 @@ pub fn auto_park_tick(ctx: Context<AutoParkTick>) -> Result<()> {
     city.park_score = (500 + guest_bonus + revenue_bonus).min(1000);
 
     msg!(
-        "Park tick — guests: {}, revenue: {}, score: {}",
+        "Park tick — park_id: {}, guests: {}, revenue: {}, score: {}",
+        city.park_id,
         city.active_guests,
         city.total_revenue,
         city.park_score,
@@ -84,10 +88,11 @@ pub fn auto_park_tick(ctx: Context<AutoParkTick>) -> Result<()> {
 // ─── Contexts ──────────────────────────────────────────────────────────────
 
 #[derive(Accounts)]
+#[instruction(park_id: u32)]
 pub struct ScheduleParkCrank<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
-    #[account(mut, seeds = [b"city"], bump = city.bump)]
+    #[account(mut, seeds = [b"city", park_id.to_le_bytes().as_ref()], bump = city.bump)]
     pub city: Account<'info, CityState>,
     /// CHECK: Magic program for scheduling
     #[account(address = MAGIC_PROGRAM_ID)]
@@ -96,6 +101,8 @@ pub struct ScheduleParkCrank<'info> {
 
 #[derive(Accounts)]
 pub struct AutoParkTick<'info> {
-    #[account(mut, seeds = [b"city"], bump = city.bump)]
+    // No seeds constraint — the specific city key was baked in at schedule_park_crank time.
+    // Anchor validates this is a CityState via account discriminator.
+    #[account(mut)]
     pub city: Account<'info, CityState>,
 }
