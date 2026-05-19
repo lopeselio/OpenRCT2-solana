@@ -37,12 +37,50 @@ function sleep(ms: number): Promise<void> {
 // exitGuest and removeVenue call commit_and_undelegate via MagicIntentBundleBuilder.
 // The ER returns a non-standard response ("Unknown action") that Anchor's WebSocket
 // confirmation path can't parse — build + sign + send manually instead.
+//
+// We poll getSignatureStatuses (HTTP) for confirmation rather than the WS
+// subscription. If the tx reverts, we throw immediately so the caller doesn't
+// fall into a 95s pollOwnership wait for an undelegation that never happens.
 async function sendErRaw(tx: Transaction): Promise<string> {
   const { blockhash } = await erConnection.getLatestBlockhash("confirmed");
   tx.recentBlockhash = blockhash;
   tx.feePayer = wallet.publicKey;
   const signed = await wallet.signTransaction(tx);
-  return erConnection.sendRawTransaction(signed.serialize(), { skipPreflight: true });
+  const signature = await erConnection.sendRawTransaction(signed.serialize(), {
+    skipPreflight: true,
+  });
+
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    const { value } = await erConnection.getSignatureStatuses([signature]);
+    const status = value[0];
+    if (status) {
+      if (status.err) {
+        // Pull logs for a useful error message.
+        let logs: string[] | null = null;
+        try {
+          const tx = await erConnection.getTransaction(signature, {
+            maxSupportedTransactionVersion: 0,
+            commitment: "confirmed",
+          });
+          logs = tx?.meta?.logMessages ?? null;
+        } catch {
+          /* best-effort */
+        }
+        const errStr = JSON.stringify(status.err);
+        const logTail = logs ? "\n  " + logs.slice(-6).join("\n  ") : "";
+        throw new Error(`[chain] ER tx ${signature} failed: ${errStr}${logTail}`);
+      }
+      if (
+        status.confirmationStatus === "confirmed" ||
+        status.confirmationStatus === "finalized"
+      ) {
+        return signature;
+      }
+    }
+    await sleep(500);
+  }
+  throw new Error(`[chain] ER tx ${signature} not confirmed within 30s`);
 }
 
 // Poll the base layer until the account's owner matches expectedOwner.
