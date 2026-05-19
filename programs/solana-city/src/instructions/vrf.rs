@@ -3,11 +3,15 @@
 // Events triggered by randomness:
 //   0–19   → Ride breakdown (venue.is_broken = true)
 //   20–49  → Nothing happens
-//   50–79  → Lucky guest prize (50–500 PARK tokens)
-//   80–99  → Park bonus: guest gets +10 PARK
+//   50–79  → Lucky guest prize (50–500 PARK tokens) — staged in venue.pending_prize
+//   80–99  → Park bonus: guest gets +10 PARK — staged in venue.pending_prize
 //
-// Each call to request_park_event triggers one random roll per guest visit.
-// The VRF oracle calls consume_park_event asynchronously.
+// IMPORTANT: consume_park_event does NOT write to guest directly. Prize/bonus
+// results are staged in venue.pending_prize so that the guest account is never
+// "externally modified" from the ER's perspective. Clients must call
+// apply_vrf_result (also on the ER) to transfer the staged prize to the guest
+// before calling exit_guest — this resets the ER's modification tracking so
+// commit_and_undelegate succeeds.
 
 use anchor_lang::prelude::*;
 use ephemeral_vrf_sdk::anchor::vrf;
@@ -27,10 +31,12 @@ pub fn request_park_event(
         callback_discriminator: crate::instruction::ConsumeParkEvent::DISCRIMINATOR.to_vec(),
         caller_seed: [client_seed; 32],
         accounts_metas: Some(vec![
+            // guest is READ-ONLY — the VRF oracle must not write to it, otherwise
+            // the ER flags it as externally-modified and blocks commit_and_undelegate.
             SerializableAccountMeta {
                 pubkey: ctx.accounts.guest.key(),
                 is_signer: false,
-                is_writable: true,
+                is_writable: false,
             },
             SerializableAccountMeta {
                 pubkey: ctx.accounts.venue.key(),
@@ -52,8 +58,6 @@ pub fn consume_park_event(
     randomness: [u8; 32],
 ) -> Result<()> {
     let roll = ephemeral_vrf_sdk::rnd::random_u8_with_range(&randomness, 0, 99);
-
-    let guest = &mut ctx.accounts.guest;
     let venue = &mut ctx.accounts.venue;
 
     match roll {
@@ -66,19 +70,45 @@ pub fn consume_park_event(
         }
         50..=79 => {
             let prize = 50_000 + ephemeral_vrf_sdk::rnd::random_u64(&randomness) % 450_001;
-            guest.pending_prize += prize;
+            venue.pending_prize = prize;
+            venue.pending_prize_guest_id = ctx.accounts.guest.guest_id;
             msg!(
-                "RANDOM EVENT: Guest {} wins {} PARK! (roll={})",
-                guest.guest_id, prize, roll
+                "RANDOM EVENT: Guest {} wins {} PARK! (roll={}) — staged in venue",
+                ctx.accounts.guest.guest_id, prize, roll
             );
         }
         80..=99 => {
-            guest.balance += 10_000;
-            msg!("RANDOM EVENT: Park bonus! Guest {} gets 10 PARK. (roll={})", guest.guest_id, roll);
+            venue.pending_prize = 10_000;
+            venue.pending_prize_guest_id = ctx.accounts.guest.guest_id;
+            msg!(
+                "RANDOM EVENT: Park bonus! Guest {} gets 10 PARK. (roll={}) — staged in venue",
+                ctx.accounts.guest.guest_id, roll
+            );
         }
         _ => unreachable!(),
     }
 
+    Ok(())
+}
+
+// Transfers any staged prize/bonus from venue → guest (ER instruction).
+// Must be called by the client AFTER consume_park_event resolves and BEFORE
+// exit_guest, so that the last write to guest comes from our program rather
+// than the VRF oracle.
+pub fn apply_vrf_result(ctx: Context<ApplyVrfResult>) -> Result<()> {
+    let prize = ctx.accounts.venue.pending_prize;
+    if prize > 0 {
+        ctx.accounts.guest.pending_prize += prize;
+        ctx.accounts.venue.pending_prize = 0;
+        ctx.accounts.venue.pending_prize_guest_id = 0;
+        msg!(
+            "VRF prize applied: {} PARK → guest {}",
+            prize,
+            ctx.accounts.guest.guest_id
+        );
+    } else {
+        msg!("apply_vrf_result: no pending prize in venue");
+    }
     Ok(())
 }
 
@@ -104,8 +134,24 @@ pub struct ConsumeParkEvent<'info> {
     /// SECURITY: Only VRF program can call this callback
     #[account(address = ephemeral_vrf_sdk::consts::VRF_PROGRAM_IDENTITY)]
     pub vrf_program_identity: Signer<'info>,
-    #[account(mut)]
+    // Read-only: we only need guest_id to record which guest gets the prize.
     pub guest: Account<'info, GuestAccount>,
     #[account(mut)]
+    pub venue: Account<'info, VenueAccount>,
+}
+
+#[derive(Accounts)]
+#[instruction(guest_id: u32, venue_id: u32)]
+pub struct ApplyVrfResult<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    #[account(mut, seeds = [b"guest", guest_id.to_le_bytes().as_ref()], bump = guest.bump)]
+    pub guest: Account<'info, GuestAccount>,
+    #[account(
+        mut,
+        seeds = [b"venue", venue_id.to_le_bytes().as_ref()],
+        bump = venue.bump,
+        constraint = venue.pending_prize_guest_id == guest_id || venue.pending_prize == 0,
+    )]
     pub venue: Account<'info, VenueAccount>,
 }
