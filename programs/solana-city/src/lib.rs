@@ -80,6 +80,32 @@ pub mod solana_city {
         venue::deactivate_venue(ctx, venue_id)
     }
 
+    // ── $PARK SPL Token ───────────────────────────────────────────────────
+    pub fn initialize_park_mint(ctx: Context<InitializeParkMint>) -> Result<()> {
+        token::initialize_park_mint(ctx)
+    }
+
+    pub fn redeem_balance(ctx: Context<RedeemBalance>, guest_id: u32) -> Result<()> {
+        token::redeem_balance(ctx, guest_id)
+    }
+
+    // ── Ride Revenue Staking ──────────────────────────────────────────────
+    pub fn create_stake_vault(ctx: Context<CreateStakeVault>, venue_id: u32) -> Result<()> {
+        staking::create_stake_vault(ctx, venue_id)
+    }
+
+    pub fn stake(ctx: Context<Stake>, venue_id: u32, amount: u64) -> Result<()> {
+        staking::stake(ctx, venue_id, amount)
+    }
+
+    pub fn unstake(ctx: Context<Unstake>, venue_id: u32) -> Result<()> {
+        staking::unstake(ctx, venue_id)
+    }
+
+    pub fn claim_stake_rewards(ctx: Context<ClaimStakeRewards>, venue_id: u32) -> Result<()> {
+        staking::claim_stake_rewards(ctx, venue_id)
+    }
+
     // ── Leaderboard ───────────────────────────────────────────────────────
     pub fn initialize_leaderboard(ctx: Context<InitializeLeaderboard>) -> Result<()> {
         leaderboard::initialize_leaderboard(ctx)
