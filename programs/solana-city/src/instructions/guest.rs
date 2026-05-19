@@ -61,8 +61,9 @@ pub fn spend(
     Ok(())
 }
 
-// Claim any pending VRF prize — ephemeral rollup
-// (Prize was set by consume_randomness callback)
+// Claim any pending VRF prize and finalize guest exit — base layer
+// Called after exit_guest returns the account to the base layer.
+// Sets is_active = false (exit_guest cannot do this — see its docs).
 pub fn claim_prize(ctx: Context<ClaimPrize>, _guest_id: u32) -> Result<()> {
     let guest = &mut ctx.accounts.guest;
     let city = &mut ctx.accounts.city;
@@ -71,9 +72,12 @@ pub fn claim_prize(ctx: Context<ClaimPrize>, _guest_id: u32) -> Result<()> {
         let prize = guest.pending_prize;
         guest.balance += prize;
         guest.pending_prize = 0;
-        city.total_revenue = city.total_revenue.saturating_sub(prize); // funded by park
+        city.total_revenue = city.total_revenue.saturating_sub(prize);
         msg!("Guest {} claimed prize: {} PARK", guest.guest_id, prize);
     }
+
+    // Finalize exit: mark guest inactive now that account is back on base layer.
+    guest.is_active = false;
     Ok(())
 }
 
@@ -90,9 +94,14 @@ pub fn commit_guest(ctx: Context<CommitGuest>) -> Result<()> {
 }
 
 // Guest exits — final commit + undelegate — ephemeral rollup
+//
+// IMPORTANT: do NOT write to the guest account here.  The ER magic program
+// calls set_account_owner_to_delegation_program during commit_and_undelegate,
+// which revokes the original-program write permission for this instruction.
+// Any account data modification in the same instruction as commit_and_undelegate
+// will fail with ExternalAccountDataModified at end-of-instruction validation.
+// is_active is cleared by claim_prize on the base layer after the account returns.
 pub fn exit_guest(ctx: Context<ExitGuest>) -> Result<()> {
-    ctx.accounts.guest.is_active = false;
-
     MagicIntentBundleBuilder::new(
         ctx.accounts.payer.to_account_info(),
         ctx.accounts.magic_context.to_account_info(),
@@ -101,12 +110,7 @@ pub fn exit_guest(ctx: Context<ExitGuest>) -> Result<()> {
     .commit_and_undelegate(&[ctx.accounts.guest.to_account_info()])
     .build_and_invoke()?;
 
-    msg!(
-        "Guest {} exited. Spent: {} PARK. Remaining: {} PARK",
-        ctx.accounts.guest.guest_id,
-        ctx.accounts.guest.total_spent,
-        ctx.accounts.guest.balance,
-    );
+    msg!("Guest exit scheduled — account will return to base layer");
     Ok(())
 }
 
@@ -177,6 +181,9 @@ pub struct CommitGuest<'info> {
 pub struct ExitGuest<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
+    // AccountInfo (not Account<T>) so Anchor never serializes this account on exit.
+    // Any write here would fail with ExternalAccountDataModified — see exit_guest docs.
+    /// CHECK: delegated guest PDA; verified by the caller via PDA derivation
     #[account(mut)]
-    pub guest: Account<'info, GuestAccount>,
+    pub guest: AccountInfo<'info>,
 }
