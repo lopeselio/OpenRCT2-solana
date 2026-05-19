@@ -44,10 +44,16 @@ pub struct VenueAccount {
     pub is_active: bool,
     pub is_broken: bool,    // set by VRF breakdown event
     pub bump: u8,
+    // VRF prize staging: consume_park_event writes here (venue is writable),
+    // client calls apply_vrf_result to transfer to guest (direct write by our program).
+    // This prevents guest from being flagged as externally-modified, which would
+    // otherwise block commit_and_undelegate on the ER.
+    pub pending_prize: u64,
+    pub pending_prize_guest_id: u32,
 }
 
 impl VenueAccount {
-    pub const LEN: usize = 8 + 4 + 1 + 32 + 8 + 1 + 1 + 1;
+    pub const LEN: usize = 8 + 4 + 1 + 32 + 8 + 1 + 1 + 1 + 8 + 4;
 }
 
 // Leaderboard — top 10 parks by revenue (optional, base layer)
