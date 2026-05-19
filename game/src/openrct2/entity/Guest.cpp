@@ -53,6 +53,7 @@
 #include "../ride/Track.h"
 #include "../ride/Vehicle.h"
 #include "../scenario/Scenario.h"
+#include "../scripting/ChainOutbox.h"
 #include "../scripting/HookEngine.h"
 #include "../scripting/ScriptEngine.h"
 #include "../ui/WindowManager.h"
@@ -1746,6 +1747,12 @@ static bool GuestDecideAndBuyItem(Guest& guest, Ride& ride, const ShopItem shopI
     else if (!(gameState.park.flags & PARK_FLAGS_NO_MONEY))
     {
         guest.SpendMoney(*expend_type, price, expenditure);
+        OpenRCT2::Scripting::ChainOutbox::Get().EmitGuestSpend(
+            static_cast<int32_t>(guest.Id.ToUnderlying()),
+            static_cast<int32_t>(ride.id.ToUnderlying()),
+            static_cast<double>(price) / 10.0,
+            static_cast<int32_t>(expenditure),
+            0);
     }
     ride.totalProfit = AddClamp(ride.totalProfit, price - shopItemDescriptor.Cost);
     ride.windowInvalidateFlags |= RIDE_INVALIDATE_RIDE_INCOME;
@@ -3911,6 +3918,12 @@ void Guest::UpdateRideFreeVehicleEnterRide(Ride& ride)
             ride.totalProfit = AddClamp<money64>(ride.totalProfit, ridePrice);
             ride.windowInvalidateFlags |= RIDE_INVALIDATE_RIDE_INCOME;
             SpendMoney(PaidOnRides, ridePrice, ExpenditureType::parkRideTickets);
+            OpenRCT2::Scripting::ChainOutbox::Get().EmitGuestSpend(
+                static_cast<int32_t>(Id.ToUnderlying()),
+                static_cast<int32_t>(CurrentRide.ToUnderlying()),
+                static_cast<double>(ridePrice) / 10.0,
+                0,
+                0);
         }
     }
 
@@ -5879,6 +5892,9 @@ void Guest::UpdateEnteringPark()
     OutsideOfPark = false;
     ParkEntryTime = getGameState().currentTicks;
     IncrementGuestsInPark();
+    OpenRCT2::Scripting::ChainOutbox::Get().EmitGuestEntry(
+        static_cast<int32_t>(Id.ToUnderlying()),
+        static_cast<double>(CashInPocket) / 10.0);
     DecrementGuestsHeadingForPark();
     auto intent = Intent(INTENT_ACTION_UPDATE_GUEST_COUNT);
     ContextBroadcastIntent(&intent);
@@ -5895,6 +5911,8 @@ void Guest::UpdateLeavingPark()
         const auto [pathingResult, _] = PerformNextAction();
         if (!(pathingResult & PATHING_OUTSIDE_PARK))
             return;
+        OpenRCT2::Scripting::ChainOutbox::Get().EmitGuestExit(
+            static_cast<int32_t>(Id.ToUnderlying()));
         PeepEntityRemove(this);
         return;
     }
@@ -5918,6 +5936,8 @@ void Guest::UpdateLeavingPark()
     const auto [pathingResult, _] = PerformNextAction();
     if (!(pathingResult & PATHING_OUTSIDE_PARK))
         return;
+    OpenRCT2::Scripting::ChainOutbox::Get().EmitGuestExit(
+        static_cast<int32_t>(Id.ToUnderlying()));
     Remove();
 }
 
