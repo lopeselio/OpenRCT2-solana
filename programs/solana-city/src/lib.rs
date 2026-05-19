@@ -6,7 +6,7 @@ pub mod state;
 
 use instructions::*;
 
-declare_id!("XP3NQyV6mBX53QxiJgGpSJyKcD6dSLJWkPaK8QZzNkg");
+declare_id!("2ce1z7iFfMB6BHzaWvT5jqhsDsS6jeEjvymGYwrb8wDn");
 
 #[ephemeral_rollups_sdk::anchor::ephemeral]
 #[program]
@@ -83,6 +83,11 @@ pub mod solana_city {
     // VRF oracle callback — do not call directly
     pub fn consume_park_event(ctx: Context<ConsumeParkEvent>, randomness: [u8; 32]) -> Result<()> {
         vrf::consume_park_event(ctx, randomness)
+    }
+
+    // ER: transfer staged VRF prize from venue → guest (call before exit_guest)
+    pub fn apply_vrf_result(ctx: Context<ApplyVrfResult>, _guest_id: u32, _venue_id: u32) -> Result<()> {
+        vrf::apply_vrf_result(ctx)
     }
 
     // ── Crank (ER automated task) ─────────────────────────────────────────
