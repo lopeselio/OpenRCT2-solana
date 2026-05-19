@@ -8,6 +8,7 @@ import {
   SystemProgram,
 } from "@solana/web3.js";
 import { BN, Program } from "@coral-xyz/anchor";
+import { DELEGATION_PROGRAM_ID } from "@magicblock-labs/ephemeral-rollups-sdk";
 import {
   baseProvider,
   erProvider,
@@ -16,6 +17,18 @@ import {
   wallet,
 } from "./clients";
 import { cityPda, guestPda, venuePda, PROGRAM_ID, PARK_ID } from "./accounts";
+
+// State of a PDA between base layer and the ER, used to make entry/exit
+// reconcile against on-chain reality instead of replaying blindly.
+type PdaState = "missing" | "base" | "delegated" | "foreign";
+
+async function getPdaState(pda: PublicKey): Promise<PdaState> {
+  const info = await baseConnection.getAccountInfo(pda);
+  if (info === null) return "missing";
+  if (info.owner.equals(PROGRAM_ID)) return "base";
+  if (info.owner.equals(DELEGATION_PROGRAM_ID)) return "delegated";
+  return "foreign";
+}
 
 // Module-level program instances — initialized once via initPrograms().
 let baseProgram: Program;
@@ -115,20 +128,45 @@ export async function onGuestEntry(
   const initialBalance = parkToUnits(cash);
   const [guest] = guestPda(guestId);
 
-  console.log(`[chain] Registering guest ${guestId} in park ${PARK_ID} (${cash} PARK)...`);
+  const state = await getPdaState(guest);
+  switch (state) {
+    case "delegated":
+      console.log(`[chain] Guest ${guestId} already delegated to ER — skip`);
+      return;
 
-  await baseProgram.methods
-    .registerGuest(PARK_ID, guestId, new BN(initialBalance.toString()))
-    .accounts({ payer: baseProvider.wallet.publicKey })
-    .rpc({ skipPreflight: false, commitment: "confirmed" });
+    case "base": {
+      // Guest PDA already exists on base from a prior session — skip register,
+      // just re-delegate. Balance carries over from the previous visit.
+      console.log(`[chain] Guest ${guestId} exists on base — re-delegating to ER...`);
+      await baseProgram.methods
+        .delegateGuest(PARK_ID, guestId)
+        .accounts({ payer: baseProvider.wallet.publicKey })
+        .rpc({ skipPreflight: false, commitment: "confirmed" });
+      await sleep(3000);
+      console.log(`[chain] Guest ${guestId} re-delegated to ER`);
+      return;
+    }
 
-  await baseProgram.methods
-    .delegateGuest(PARK_ID, guestId)
-    .accounts({ payer: baseProvider.wallet.publicKey })
-    .rpc({ skipPreflight: false, commitment: "confirmed" });
+    case "missing": {
+      console.log(`[chain] Registering guest ${guestId} in park ${PARK_ID} (${cash} PARK)...`);
+      await baseProgram.methods
+        .registerGuest(PARK_ID, guestId, new BN(initialBalance.toString()))
+        .accounts({ payer: baseProvider.wallet.publicKey })
+        .rpc({ skipPreflight: false, commitment: "confirmed" });
+      await baseProgram.methods
+        .delegateGuest(PARK_ID, guestId)
+        .accounts({ payer: baseProvider.wallet.publicKey })
+        .rpc({ skipPreflight: false, commitment: "confirmed" });
+      await sleep(3000);
+      console.log(`[chain] Guest ${guestId} delegated to ER`);
+      return;
+    }
 
-  await sleep(3000);
-  console.log(`[chain] Guest ${guestId} delegated to ER`);
+    case "foreign":
+      throw new Error(
+        `[chain] Guest ${guestId} PDA ${guest.toBase58()} owned by unexpected program — refusing to touch`
+      );
+  }
 }
 
 export async function onGuestSpend(
@@ -150,34 +188,48 @@ export async function onGuestSpend(
 export async function onGuestExit(guestId: number): Promise<void> {
   const [guest] = guestPda(guestId);
 
-  console.log(`[chain] Guest ${guestId} exiting park ${PARK_ID} — committing + undelegating...`);
+  const state = await getPdaState(guest);
 
-  // exitGuest calls commit_and_undelegate — use sendRawTransaction (see comment above).
-  const tx = await erProgram.methods
-    .exitGuest()
-    .accounts({ payer: erProvider.wallet.publicKey, guest })
-    .transaction();
-  await sendErRaw(tx);
+  if (state === "missing") {
+    console.log(`[chain] Guest ${guestId} has no on-chain PDA — exit no-op`);
+    return;
+  }
 
-  // Poll until the account's owner returns to the program (max 95s)
-  await pollOwnership(guest, PROGRAM_ID, 95_000, `guest ${guestId}`);
-  console.log(`[chain] Guest ${guestId} returned to base layer`);
+  if (state === "foreign") {
+    throw new Error(
+      `[chain] Guest ${guestId} PDA ${guest.toBase58()} owned by unexpected program`
+    );
+  }
+
+  if (state === "delegated") {
+    console.log(`[chain] Guest ${guestId} exiting park ${PARK_ID} — committing + undelegating...`);
+    const tx = await erProgram.methods
+      .exitGuest()
+      .accounts({ payer: erProvider.wallet.publicKey, guest })
+      .transaction();
+    await sendErRaw(tx);
+    await pollOwnership(guest, PROGRAM_ID, 95_000, `guest ${guestId}`);
+    console.log(`[chain] Guest ${guestId} returned to base layer`);
+  } else {
+    // state === "base" — already on base, nothing to undelegate.
+    console.log(`[chain] Guest ${guestId} already on base — finalizing only`);
+  }
 
   // Finalize: clear is_active, decrement active_guests, credit any staged VRF prize.
-  // claim_prize is a no-op if pending_prize == 0, so always safe to call.
+  // claim_prize is a no-op if pending_prize == 0 and already-inactive, so safe to call.
   await baseProgram.methods
     .claimPrize(PARK_ID, guestId)
     .accounts({ payer: baseProvider.wallet.publicKey })
     .rpc({ commitment: "confirmed" });
 
-  // Mint any remaining internal PARK balance as real $PARK SPL tokens.
+  // Mint any remaining internal TYCOON balance as real $TYCOON SPL tokens.
   const guestAcc = await (baseProgram.account as any).guestAccount.fetch(guest);
   if (guestAcc.balance.gtn(0)) {
     await baseProgram.methods
       .redeemBalance(guestId)
       .accounts({ payer: baseProvider.wallet.publicKey, guest })
       .rpc({ commitment: "confirmed" });
-    console.log(`[chain] Guest ${guestId} redeemed ${guestAcc.balance.toString()} PARK tokens`);
+    console.log(`[chain] Guest ${guestId} redeemed ${guestAcc.balance.toString()} $TYCOON`);
   }
 
   console.log(`[chain] Guest ${guestId} fully exited park ${PARK_ID}`);
@@ -192,20 +244,41 @@ export async function onVenueRegistered(
 ): Promise<void> {
   const [venue] = venuePda(venueId);
 
-  console.log(`[chain] Registering venue ${venueId} '${name}' in park ${PARK_ID}...`);
+  const state = await getPdaState(venue);
+  switch (state) {
+    case "delegated":
+      console.log(`[chain] Venue ${venueId} already delegated to ER — skip`);
+      return;
 
-  await baseProgram.methods
-    .registerVenue(PARK_ID, venueId, venueKind, name)
-    .accounts({ payer: baseProvider.wallet.publicKey })
-    .rpc({ commitment: "confirmed" });
+    case "base":
+      console.log(`[chain] Venue ${venueId} exists on base — re-delegating to ER...`);
+      await baseProgram.methods
+        .delegateVenue(PARK_ID, venueId)
+        .accounts({ payer: baseProvider.wallet.publicKey })
+        .rpc({ commitment: "confirmed" });
+      await sleep(3000);
+      console.log(`[chain] Venue ${venueId} re-delegated to ER`);
+      return;
 
-  await baseProgram.methods
-    .delegateVenue(PARK_ID, venueId)
-    .accounts({ payer: baseProvider.wallet.publicKey })
-    .rpc({ commitment: "confirmed" });
+    case "missing":
+      console.log(`[chain] Registering venue ${venueId} '${name}' in park ${PARK_ID}...`);
+      await baseProgram.methods
+        .registerVenue(PARK_ID, venueId, venueKind, name)
+        .accounts({ payer: baseProvider.wallet.publicKey })
+        .rpc({ commitment: "confirmed" });
+      await baseProgram.methods
+        .delegateVenue(PARK_ID, venueId)
+        .accounts({ payer: baseProvider.wallet.publicKey })
+        .rpc({ commitment: "confirmed" });
+      await sleep(3000);
+      console.log(`[chain] Venue ${venueId} delegated to ER`);
+      return;
 
-  await sleep(3000);
-  console.log(`[chain] Venue ${venueId} delegated to ER`);
+    case "foreign":
+      throw new Error(
+        `[chain] Venue ${venueId} PDA ${venue.toBase58()} owned by unexpected program`
+      );
+  }
 }
 
 export async function onVenueRenamed(
@@ -222,20 +295,32 @@ export async function onVenueRenamed(
 export async function onVenueRemoved(venueId: number): Promise<void> {
   const [venue] = venuePda(venueId);
 
-  console.log(`[chain] Removing venue ${venueId} from park ${PARK_ID}...`);
+  const state = await getPdaState(venue);
 
-  // removeVenue calls commit_and_undelegate — use sendRawTransaction (see comment above).
-  const tx = await erProgram.methods
-    .removeVenue(PARK_ID)
-    .accounts({ payer: erProvider.wallet.publicKey, venue })
-    .transaction();
-  await sendErRaw(tx);
+  if (state === "missing") {
+    console.log(`[chain] Venue ${venueId} has no on-chain PDA — remove no-op`);
+    return;
+  }
 
-  // Poll until venue account returns to base layer (max 95s)
-  await pollOwnership(venue, PROGRAM_ID, 95_000, `venue ${venueId}`);
-  console.log(`[chain] Venue ${venueId} returned to base layer`);
+  if (state === "foreign") {
+    throw new Error(
+      `[chain] Venue ${venueId} PDA ${venue.toBase58()} owned by unexpected program`
+    );
+  }
 
-  // Finalize: set is_active = false. removeVenue can't do this (ExternalAccountDataModified).
+  if (state === "delegated") {
+    console.log(`[chain] Removing venue ${venueId} from park ${PARK_ID}...`);
+    const tx = await erProgram.methods
+      .removeVenue(PARK_ID)
+      .accounts({ payer: erProvider.wallet.publicKey, venue })
+      .transaction();
+    await sendErRaw(tx);
+    await pollOwnership(venue, PROGRAM_ID, 95_000, `venue ${venueId}`);
+    console.log(`[chain] Venue ${venueId} returned to base layer`);
+  } else {
+    console.log(`[chain] Venue ${venueId} already on base — finalizing only`);
+  }
+
   await baseProgram.methods
     .deactivateVenue(PARK_ID, venueId)
     .accounts({ payer: baseProvider.wallet.publicKey })
