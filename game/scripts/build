@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+
+set -e
+
+require_libvterm() {
+    local uname_s
+    uname_s=$(uname)
+    case "$uname_s" in
+        Darwin|Linux)
+            ;;
+        *)
+            return 0
+            ;;
+    esac
+
+    if command -v pkg-config >/dev/null 2>&1 && pkg-config --exists vterm; then
+        return 0
+    fi
+
+    cat >&2 <<'EOF'
+[OpenRCT2] libvterm (and pkg-config) are required for the AI Agent terminal renderer.
+[OpenRCT2] Install them first, e.g. `brew install libvterm pkg-config`, then re-run scripts/build.
+[OpenRCT2] To intentionally build without libvterm, rerun cmake with -DOPENRCT2_ALLOW_VTERM_FALLBACK=ON.
+EOF
+    exit 20
+}
+
+# Ensure we are in root directory
+if [[ $(uname) == "Darwin" ]]; then
+    basedir="$(perl -MCwd=abs_path -le 'print abs_path readlink(shift);' `dirname $0`/..)"
+else
+    basedir="$(readlink -f `dirname $0`/..)"
+fi
+cd $basedir
+
+if [[ "$OSTYPE" == "cygwin" || "$OSTYPE" == "msys" ]]; then
+    # Patch version.h
+    echo -e "\033[0;36mPatching version.h...\033[0m"
+    fileversion=$OPENRCT2_VERSION.$OPENRCT2_BUILD
+    productversion="$fileversion-${OPENRCT2_SHA1_SHORT}"
+    fileversion=${fileversion//./,}
+    # FILEVERSION in the resource file can only take up to 4 digits in the version string, so we remove the surplus of version numbers
+    fileversion=$(echo $fileversion | cut -f1-4 -d",")
+    echo "#define OPENRCT2_FILE_VERSION $fileversion" > "resources/version.h"
+    echo "#define OPENRCT2_PRODUCT_VERSION \"$productversion\"" >> "resources/version.h"
+    cat "resources/version.h"
+
+    # Build everything
+    echo -e "\033[0;36mBuilding OpenRCT2 for Windows $CONFIGURATION|$PLATFORM...\033[0m"
+    vstool msbuild openrct2.proj -t:build -p:Breakpad=true -p:UsePCH=true
+
+    # Create openrct2.exe and openrct2.com with correct subsystem
+    cp bin/openrct2.exe bin/openrct2.com
+    vstool editbin //subsystem:console bin/openrct2.com
+    vstool editbin //subsystem:windows bin/openrct2.exe
+else
+    echo -e "\033[0;36mBuilding OpenRCT2...\033[0m"
+    mkdir -p bin && cd bin
+    export DESTDIR=install
+    require_libvterm
+    cmake .. -G Ninja -DCMAKE_INSTALL_PREFIX=/usr "$@"
+
+    ninja -k0 all install
+fi
