@@ -1,11 +1,11 @@
 // Transaction builders for all on-chain operations.
-// Each function returns a signed, sendable transaction routed to the correct endpoint.
+// Handlers are routed to either the Solana base layer or MagicBlock Ephemeral Rollup.
+// The game is never blocked — events queue up if the sidecar is slow.
 
 import {
   PublicKey,
   Transaction,
   SystemProgram,
-  LAMPORTS_PER_SOL,
 } from "@solana/web3.js";
 import { BN, Program } from "@coral-xyz/anchor";
 import {
@@ -13,20 +13,64 @@ import {
   erProvider,
   baseConnection,
   erConnection,
-  isDelegated,
+  wallet,
 } from "./clients";
 import { cityPda, guestPda, venuePda, PROGRAM_ID } from "./accounts";
 
-// Converts PARK string ("1234.56") to u64 integer (1234_560_000)
+// Module-level program instances — initialized once via initPrograms().
+let baseProgram: Program;
+let erProgram: Program;
+
+// Call once after loading the IDL. In Anchor 0.30+, Program takes (idl, provider)
+// and reads the program ID from the IDL — the old 3-arg form is gone.
+export function initPrograms(idl: any): void {
+  baseProgram = new Program(idl, baseProvider);
+  erProgram = new Program(idl, erProvider);
+}
+
+// ─── Internal helpers ────────────────────────────────────────────────────────
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+// exitGuest and removeVenue call commit_and_undelegate via MagicIntentBundleBuilder.
+// The ER returns a non-standard response ("Unknown action") that Anchor's WebSocket
+// confirmation path can't parse — build + sign + send manually instead.
+async function sendErRaw(tx: Transaction): Promise<string> {
+  const { blockhash } = await erConnection.getLatestBlockhash("confirmed");
+  tx.recentBlockhash = blockhash;
+  tx.feePayer = wallet.publicKey;
+  const signed = await wallet.signTransaction(tx);
+  return erConnection.sendRawTransaction(signed.serialize(), { skipPreflight: true });
+}
+
+// Poll the base layer until the account's owner matches expectedOwner.
+async function pollOwnership(
+  pda: PublicKey,
+  expectedOwner: PublicKey,
+  timeoutMs: number,
+  label: string
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    const info = await baseConnection.getAccountInfo(pda);
+    if (info !== null && info.owner.equals(expectedOwner)) return;
+    if (Date.now() >= deadline) {
+      throw new Error(`[chain] Timed out waiting for ${label} to return to base layer after ${timeoutMs}ms`);
+    }
+    await sleep(1500);
+  }
+}
+
+// ─── Guest Operations ───────────────────────────────────────────────────────
+
 const PARK_UNIT = 1_000_000n;
 function parkToUnits(s: string): bigint {
   return BigInt(Math.round(parseFloat(s) * Number(PARK_UNIT)));
 }
 
-// ─── Guest Operations ───────────────────────────────────────────────────────
-
 export async function onGuestEntry(
-  program: Program,
   guestId: number,
   cash: string
 ): Promise<void> {
@@ -36,27 +80,21 @@ export async function onGuestEntry(
 
   console.log(`[chain] Registering guest ${guestId} (${cash} PARK)...`);
 
-  // 1. Register on base layer
-  await program.methods
+  await baseProgram.methods
     .registerGuest(guestId, new BN(initialBalance.toString()))
     .accounts({ payer: baseProvider.wallet.publicKey, city, guest, systemProgram: SystemProgram.programId })
-    .provider(baseProvider)
     .rpc({ skipPreflight: false, commitment: "confirmed" });
 
-  // 2. Delegate to ER (base layer tx)
-  await program.methods
+  await baseProgram.methods
     .delegateGuest(guestId)
     .accounts({ payer: baseProvider.wallet.publicKey, guest })
-    .provider(baseProvider)
     .rpc({ skipPreflight: false, commitment: "confirmed" });
 
-  // Small wait for ER to recognise the delegation
   await sleep(3000);
   console.log(`[chain] Guest ${guestId} delegated to ER`);
 }
 
 export async function onGuestSpend(
-  program: Program,
   guestId: number,
   venueId: number,
   amount: string,
@@ -66,36 +104,42 @@ export async function onGuestSpend(
   const [guest] = guestPda(guestId);
   const [venue] = venuePda(venueId);
 
-  // Spend goes to ER for ~10-50ms finality
-  await program.methods
+  await erProgram.methods
     .spend(guestId, venueId, new BN(amountUnits.toString()), category)
     .accounts({ payer: erProvider.wallet.publicKey, guest, venue })
-    .provider(erProvider)
     .rpc({ skipPreflight: true });
 }
 
-export async function onGuestExit(
-  program: Program,
-  guestId: number
-): Promise<void> {
+export async function onGuestExit(guestId: number): Promise<void> {
   const [guest] = guestPda(guestId);
+  const [city] = cityPda();
 
   console.log(`[chain] Guest ${guestId} exiting — committing + undelegating...`);
 
-  await program.methods
+  // exitGuest calls commit_and_undelegate — use sendRawTransaction (see comment above).
+  const tx = await erProgram.methods
     .exitGuest()
     .accounts({ payer: erProvider.wallet.publicKey, guest })
-    .provider(erProvider)
-    .rpc({ skipPreflight: true });
+    .transaction();
+  await sendErRaw(tx);
 
-  await sleep(3000); // wait for base layer to receive the undelegation
+  // Poll until the account's owner returns to the program (max 95s)
+  await pollOwnership(guest, PROGRAM_ID, 95_000, `guest ${guestId}`);
+  console.log(`[chain] Guest ${guestId} returned to base layer`);
+
+  // Finalize: clear is_active, decrement active_guests, credit any staged VRF prize.
+  // claim_prize is a no-op if pending_prize == 0, so always safe to call.
+  await baseProgram.methods
+    .claimPrize(guestId)
+    .accounts({ payer: baseProvider.wallet.publicKey, guest, city })
+    .rpc({ commitment: "confirmed" });
+
   console.log(`[chain] Guest ${guestId} fully exited`);
 }
 
 // ─── Venue Operations ───────────────────────────────────────────────────────
 
 export async function onVenueRegistered(
-  program: Program,
   venueId: number,
   venueKind: number,
   name: string
@@ -105,18 +149,14 @@ export async function onVenueRegistered(
 
   console.log(`[chain] Registering venue ${venueId} '${name}'...`);
 
-  // Register on base layer
-  await program.methods
+  await baseProgram.methods
     .registerVenue(venueId, venueKind, name)
     .accounts({ payer: baseProvider.wallet.publicKey, city, venue, systemProgram: SystemProgram.programId })
-    .provider(baseProvider)
     .rpc({ commitment: "confirmed" });
 
-  // Delegate to ER
-  await program.methods
+  await baseProgram.methods
     .delegateVenue(venueId)
     .accounts({ payer: baseProvider.wallet.publicKey, venue })
-    .provider(baseProvider)
     .rpc({ commitment: "confirmed" });
 
   await sleep(3000);
@@ -124,35 +164,38 @@ export async function onVenueRegistered(
 }
 
 export async function onVenueRenamed(
-  program: Program,
   venueId: number,
   newName: string
 ): Promise<void> {
   const [venue] = venuePda(venueId);
-  await program.methods
+  await erProgram.methods
     .renameVenue(venueId, newName)
     .accounts({ payer: erProvider.wallet.publicKey, venue })
-    .provider(erProvider)
     .rpc({ skipPreflight: true });
 }
 
-export async function onVenueRemoved(
-  program: Program,
-  venueId: number
-): Promise<void> {
+export async function onVenueRemoved(venueId: number): Promise<void> {
   const [city] = cityPda();
   const [venue] = venuePda(venueId);
 
   console.log(`[chain] Removing venue ${venueId}...`);
-  await program.methods
+
+  // removeVenue calls commit_and_undelegate — use sendRawTransaction (see comment above).
+  const tx = await erProgram.methods
     .removeVenue()
     .accounts({ payer: erProvider.wallet.publicKey, venue, city })
-    .provider(erProvider)
-    .rpc({ skipPreflight: true });
+    .transaction();
+  await sendErRaw(tx);
 
-  await sleep(3000);
-}
+  // Poll until venue account returns to base layer (max 95s)
+  await pollOwnership(venue, PROGRAM_ID, 95_000, `venue ${venueId}`);
+  console.log(`[chain] Venue ${venueId} returned to base layer`);
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
+  // Finalize: set is_active = false. removeVenue can't do this (ExternalAccountDataModified).
+  await baseProgram.methods
+    .deactivateVenue(venueId)
+    .accounts({ payer: baseProvider.wallet.publicKey, venue })
+    .rpc({ commitment: "confirmed" });
+
+  console.log(`[chain] Venue ${venueId} fully removed`);
 }

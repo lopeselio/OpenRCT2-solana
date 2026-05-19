@@ -1,7 +1,7 @@
 import { PublicKey } from "@solana/web3.js";
 
 const PROGRAM_ID = new PublicKey(
-  process.env.PROGRAM_ID ?? "XP3NQyV6mBX53QxiJgGpSJyKcD6dSLJWkPaK8QZzNkg"
+  process.env.PROGRAM_ID ?? "2ce1z7iFfMB6BHzaWvT5jqhsDsS6jeEjvymGYwrb8wDn"
 );
 
 export function cityPda(): [PublicKey, number] {
