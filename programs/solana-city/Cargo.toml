@@ -26,6 +26,7 @@ ephemeral-rollups-sdk = { version = "0.11.1", features = ["anchor", "disable-rea
 ephemeral-vrf-sdk = { version = "0.2.3", features = ["anchor"] }
 magicblock-magic-program-api = { version = "0.8.5", default-features = false }
 bincode = "^1.3"
+blake3 = "=1.5.5"
 
 
 [lints.rust]
