@@ -7,6 +7,7 @@ use crate::errors::CityError;
 
 pub fn register_venue(
     ctx: Context<RegisterVenue>,
+    _park_id: u32,
     venue_id: u32,
     venue_kind: u8,
     name: String,
@@ -26,22 +27,23 @@ pub fn register_venue(
     venue.name = name_bytes;
 
     ctx.accounts.city.venue_count += 1;
-    msg!("Venue {} '{}' registered (kind={})", venue_id, name, venue_kind);
+    msg!("Venue {} '{}' registered in park {} (kind={})", venue_id, name, _park_id, venue_kind);
     Ok(())
 }
 
-pub fn delegate_venue(ctx: Context<DelegateVenue>, venue_id: u32) -> Result<()> {
+pub fn delegate_venue(ctx: Context<DelegateVenue>, park_id: u32, venue_id: u32) -> Result<()> {
+    let park_bytes = park_id.to_le_bytes();
     let id_bytes = venue_id.to_le_bytes();
     ctx.accounts.delegate_venue(
         &ctx.accounts.payer,
-        &[b"venue", id_bytes.as_ref()],
+        &[b"venue", park_bytes.as_ref(), id_bytes.as_ref()],
         DelegateConfig::default(),
     )?;
     Ok(())
 }
 
 // Rename a venue while it is delegated — ephemeral rollup
-pub fn rename_venue(ctx: Context<RenameVenue>, _venue_id: u32, new_name: String) -> Result<()> {
+pub fn rename_venue(ctx: Context<RenameVenue>, _park_id: u32, _venue_id: u32, new_name: String) -> Result<()> {
     require!(new_name.len() <= 32, CityError::NameTooLong);
 
     let mut name_bytes = [0u8; 32];
@@ -51,7 +53,7 @@ pub fn rename_venue(ctx: Context<RenameVenue>, _venue_id: u32, new_name: String)
 }
 
 // Repair a broken ride (after VRF breakdown event) — ephemeral rollup
-pub fn repair_venue(ctx: Context<RepairVenue>, _venue_id: u32) -> Result<()> {
+pub fn repair_venue(ctx: Context<RepairVenue>, _park_id: u32, _venue_id: u32) -> Result<()> {
     ctx.accounts.venue.is_broken = false;
     msg!("Venue {} repaired", ctx.accounts.venue.venue_id);
     Ok(())
@@ -59,10 +61,13 @@ pub fn repair_venue(ctx: Context<RepairVenue>, _venue_id: u32) -> Result<()> {
 
 // Remove a venue — commit final revenue + undelegate — ephemeral rollup
 //
-// Do NOT write to venue here — same ExternalAccountDataModified constraint as exit_guest.
+// Do NOT write to any account here — same ExternalAccountDataModified constraint as exit_guest.
 // The magic program revokes write permission during commit_and_undelegate; any data
-// modification in the same instruction fails end-of-instruction validation.
-pub fn remove_venue(ctx: Context<RemoveVenue>) -> Result<()> {
+// modification in the same instruction (including writing to city) fails end-of-instruction
+// validation because the ER can't write back to non-delegated base-layer accounts.
+// venue_count is decremented by deactivate_venue on the base layer (mirrors the
+// active_guests pattern: exit_guest does nothing, claim_prize does the state update).
+pub fn remove_venue(ctx: Context<RemoveVenue>, _park_id: u32) -> Result<()> {
     MagicIntentBundleBuilder::new(
         ctx.accounts.payer.to_account_info(),
         ctx.accounts.magic_context.to_account_info(),
@@ -71,15 +76,16 @@ pub fn remove_venue(ctx: Context<RemoveVenue>) -> Result<()> {
     .commit_and_undelegate(&[ctx.accounts.venue.to_account_info()])
     .build_and_invoke()?;
 
-    ctx.accounts.city.venue_count = ctx.accounts.city.venue_count.saturating_sub(1);
     msg!("Venue removed — account will return to base layer");
     Ok(())
 }
 
 // Finalise venue removal on base layer — call after remove_venue returns the account.
-// Sets is_active = false; remove_venue cannot do this (ExternalAccountDataModified).
-pub fn deactivate_venue(ctx: Context<DeactivateVenue>, _venue_id: u32) -> Result<()> {
+// Sets is_active = false and decrements city.venue_count.
+// remove_venue cannot do either (ExternalAccountDataModified on ER).
+pub fn deactivate_venue(ctx: Context<DeactivateVenue>, _park_id: u32, _venue_id: u32) -> Result<()> {
     ctx.accounts.venue.is_active = false;
+    ctx.accounts.city.venue_count = ctx.accounts.city.venue_count.saturating_sub(1);
     msg!("Venue {} deactivated", ctx.accounts.venue.venue_id);
     Ok(())
 }
@@ -87,17 +93,17 @@ pub fn deactivate_venue(ctx: Context<DeactivateVenue>, _venue_id: u32) -> Result
 // ─── Contexts ──────────────────────────────────────────────────────────────
 
 #[derive(Accounts)]
-#[instruction(venue_id: u32)]
+#[instruction(park_id: u32, venue_id: u32)]
 pub struct RegisterVenue<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
-    #[account(mut, seeds = [b"city"], bump = city.bump)]
+    #[account(mut, seeds = [b"city", park_id.to_le_bytes().as_ref()], bump = city.bump)]
     pub city: Account<'info, CityState>,
     #[account(
         init,
         payer = payer,
         space = VenueAccount::LEN,
-        seeds = [b"venue", venue_id.to_le_bytes().as_ref()],
+        seeds = [b"venue", park_id.to_le_bytes().as_ref(), venue_id.to_le_bytes().as_ref()],
         bump,
     )]
     pub venue: Account<'info, VenueAccount>,
@@ -106,44 +112,47 @@ pub struct RegisterVenue<'info> {
 
 #[delegate]
 #[derive(Accounts)]
-#[instruction(venue_id: u32)]
+#[instruction(park_id: u32, venue_id: u32)]
 pub struct DelegateVenue<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
     /// CHECK: PDA to delegate to ER
-    #[account(mut, del, seeds = [b"venue", venue_id.to_le_bytes().as_ref()], bump)]
+    #[account(mut, del, seeds = [b"venue", park_id.to_le_bytes().as_ref(), venue_id.to_le_bytes().as_ref()], bump)]
     pub venue: AccountInfo<'info>,
 }
 
 #[derive(Accounts)]
-#[instruction(venue_id: u32)]
+#[instruction(park_id: u32, venue_id: u32)]
 pub struct RenameVenue<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
-    #[account(mut, seeds = [b"venue", venue_id.to_le_bytes().as_ref()], bump = venue.bump)]
+    #[account(mut, seeds = [b"venue", park_id.to_le_bytes().as_ref(), venue_id.to_le_bytes().as_ref()], bump = venue.bump)]
     pub venue: Account<'info, VenueAccount>,
 }
 
 #[derive(Accounts)]
-#[instruction(venue_id: u32)]
+#[instruction(park_id: u32, venue_id: u32)]
 pub struct RepairVenue<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
-    #[account(mut, seeds = [b"venue", venue_id.to_le_bytes().as_ref()], bump = venue.bump)]
+    #[account(mut, seeds = [b"venue", park_id.to_le_bytes().as_ref(), venue_id.to_le_bytes().as_ref()], bump = venue.bump)]
     pub venue: Account<'info, VenueAccount>,
 }
 
 #[derive(Accounts)]
-#[instruction(venue_id: u32)]
+#[instruction(park_id: u32, venue_id: u32)]
 pub struct DeactivateVenue<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
-    #[account(mut, seeds = [b"venue", venue_id.to_le_bytes().as_ref()], bump = venue.bump)]
+    #[account(mut, seeds = [b"venue", park_id.to_le_bytes().as_ref(), venue_id.to_le_bytes().as_ref()], bump = venue.bump)]
     pub venue: Account<'info, VenueAccount>,
+    #[account(mut, seeds = [b"city", park_id.to_le_bytes().as_ref()], bump = city.bump)]
+    pub city: Account<'info, CityState>,
 }
 
 #[commit]
 #[derive(Accounts)]
+#[instruction(park_id: u32)]
 pub struct RemoveVenue<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
@@ -151,6 +160,6 @@ pub struct RemoveVenue<'info> {
     /// CHECK: delegated venue PDA; verified by the caller via PDA derivation
     #[account(mut)]
     pub venue: AccountInfo<'info>,
-    #[account(mut, seeds = [b"city"], bump = city.bump)]
-    pub city: Account<'info, CityState>,
+    // city is NOT included here: writing to non-delegated base-layer accounts from ER
+    // fails silently (ExternalAccountDataModified). venue_count is updated by deactivate_venue.
 }

@@ -1,3 +1,4 @@
+pub mod badges;
 pub mod city;
 pub mod guest;
 pub mod leaderboard;
@@ -7,6 +8,7 @@ pub mod venue;
 pub mod vrf;
 pub mod crank;
 
+pub use badges::*;
 pub use city::*;
 pub use guest::*;
 pub use leaderboard::*;

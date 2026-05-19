@@ -14,31 +14,31 @@ pub mod solana_city {
     use super::*;
 
     // ── City lifecycle ────────────────────────────────────────────────────
-    pub fn initialize_city(ctx: Context<InitializeCity>, name: String) -> Result<()> {
-        city::initialize_city(ctx, name)
+    pub fn initialize_city(ctx: Context<InitializeCity>, park_id: u32, name: String) -> Result<()> {
+        city::initialize_city(ctx, park_id, name)
     }
 
-    pub fn update_park_score(ctx: Context<UpdateParkScore>) -> Result<()> {
-        city::update_park_score(ctx)
+    pub fn update_park_score(ctx: Context<UpdateParkScore>, park_id: u32) -> Result<()> {
+        city::update_park_score(ctx, park_id)
     }
 
     // ── Guest lifecycle ───────────────────────────────────────────────────
-    pub fn register_guest(ctx: Context<RegisterGuest>, guest_id: u32, initial_balance: u64) -> Result<()> {
-        guest::register_guest(ctx, guest_id, initial_balance)
+    pub fn register_guest(ctx: Context<RegisterGuest>, park_id: u32, guest_id: u32, initial_balance: u64) -> Result<()> {
+        guest::register_guest(ctx, park_id, guest_id, initial_balance)
     }
 
-    pub fn delegate_guest(ctx: Context<DelegateGuest>, guest_id: u32) -> Result<()> {
-        guest::delegate_guest(ctx, guest_id)
+    pub fn delegate_guest(ctx: Context<DelegateGuest>, park_id: u32, guest_id: u32) -> Result<()> {
+        guest::delegate_guest(ctx, park_id, guest_id)
     }
 
     // ER: guest pays at a venue
-    pub fn spend(ctx: Context<Spend>, guest_id: u32, venue_id: u32, amount: u64, category: u8) -> Result<()> {
-        guest::spend(ctx, guest_id, venue_id, amount, category)
+    pub fn spend(ctx: Context<Spend>, park_id: u32, guest_id: u32, venue_id: u32, amount: u64, category: u8) -> Result<()> {
+        guest::spend(ctx, park_id, guest_id, venue_id, amount, category)
     }
 
     // ER: collect pending VRF prize
-    pub fn claim_prize(ctx: Context<ClaimPrize>, guest_id: u32) -> Result<()> {
-        guest::claim_prize(ctx, guest_id)
+    pub fn claim_prize(ctx: Context<ClaimPrize>, park_id: u32, guest_id: u32) -> Result<()> {
+        guest::claim_prize(ctx, park_id, guest_id)
     }
 
     // ER: sync state to base layer without undelegating
@@ -52,32 +52,32 @@ pub mod solana_city {
     }
 
     // ── Venue lifecycle ───────────────────────────────────────────────────
-    pub fn register_venue(ctx: Context<RegisterVenue>, venue_id: u32, venue_kind: u8, name: String) -> Result<()> {
-        venue::register_venue(ctx, venue_id, venue_kind, name)
+    pub fn register_venue(ctx: Context<RegisterVenue>, park_id: u32, venue_id: u32, venue_kind: u8, name: String) -> Result<()> {
+        venue::register_venue(ctx, park_id, venue_id, venue_kind, name)
     }
 
-    pub fn delegate_venue(ctx: Context<DelegateVenue>, venue_id: u32) -> Result<()> {
-        venue::delegate_venue(ctx, venue_id)
+    pub fn delegate_venue(ctx: Context<DelegateVenue>, park_id: u32, venue_id: u32) -> Result<()> {
+        venue::delegate_venue(ctx, park_id, venue_id)
     }
 
     // ER: rename a live venue
-    pub fn rename_venue(ctx: Context<RenameVenue>, venue_id: u32, new_name: String) -> Result<()> {
-        venue::rename_venue(ctx, venue_id, new_name)
+    pub fn rename_venue(ctx: Context<RenameVenue>, park_id: u32, venue_id: u32, new_name: String) -> Result<()> {
+        venue::rename_venue(ctx, park_id, venue_id, new_name)
     }
 
     // ER: repair a broken ride (after VRF breakdown)
-    pub fn repair_venue(ctx: Context<RepairVenue>, venue_id: u32) -> Result<()> {
-        venue::repair_venue(ctx, venue_id)
+    pub fn repair_venue(ctx: Context<RepairVenue>, park_id: u32, venue_id: u32) -> Result<()> {
+        venue::repair_venue(ctx, park_id, venue_id)
     }
 
     // ER: remove a venue — commit + undelegate
-    pub fn remove_venue(ctx: Context<RemoveVenue>) -> Result<()> {
-        venue::remove_venue(ctx)
+    pub fn remove_venue(ctx: Context<RemoveVenue>, park_id: u32) -> Result<()> {
+        venue::remove_venue(ctx, park_id)
     }
 
     // Base layer: finalise venue removal after account returns from ER
-    pub fn deactivate_venue(ctx: Context<DeactivateVenue>, venue_id: u32) -> Result<()> {
-        venue::deactivate_venue(ctx, venue_id)
+    pub fn deactivate_venue(ctx: Context<DeactivateVenue>, park_id: u32, venue_id: u32) -> Result<()> {
+        venue::deactivate_venue(ctx, park_id, venue_id)
     }
 
     // ── $PARK SPL Token ───────────────────────────────────────────────────
@@ -90,20 +90,20 @@ pub mod solana_city {
     }
 
     // ── Ride Revenue Staking ──────────────────────────────────────────────
-    pub fn create_stake_vault(ctx: Context<CreateStakeVault>, venue_id: u32) -> Result<()> {
-        staking::create_stake_vault(ctx, venue_id)
+    pub fn create_stake_vault(ctx: Context<CreateStakeVault>, park_id: u32, venue_id: u32) -> Result<()> {
+        staking::create_stake_vault(ctx, park_id, venue_id)
     }
 
-    pub fn stake(ctx: Context<Stake>, venue_id: u32, amount: u64) -> Result<()> {
-        staking::stake(ctx, venue_id, amount)
+    pub fn stake(ctx: Context<Stake>, park_id: u32, venue_id: u32, amount: u64) -> Result<()> {
+        staking::stake(ctx, park_id, venue_id, amount)
     }
 
-    pub fn unstake(ctx: Context<Unstake>, venue_id: u32) -> Result<()> {
-        staking::unstake(ctx, venue_id)
+    pub fn unstake(ctx: Context<Unstake>, park_id: u32, venue_id: u32) -> Result<()> {
+        staking::unstake(ctx, park_id, venue_id)
     }
 
-    pub fn claim_stake_rewards(ctx: Context<ClaimStakeRewards>, venue_id: u32) -> Result<()> {
-        staking::claim_stake_rewards(ctx, venue_id)
+    pub fn claim_stake_rewards(ctx: Context<ClaimStakeRewards>, park_id: u32, venue_id: u32) -> Result<()> {
+        staking::claim_stake_rewards(ctx, park_id, venue_id)
     }
 
     // ── Leaderboard ───────────────────────────────────────────────────────
@@ -116,7 +116,7 @@ pub mod solana_city {
     }
 
     // ── VRF random events (ER) ────────────────────────────────────────────
-    pub fn request_park_event(ctx: Context<RequestParkEvent>, guest_id: u32, client_seed: u8) -> Result<()> {
+    pub fn request_park_event(ctx: Context<RequestParkEvent>, park_id: u32, guest_id: u32, client_seed: u8) -> Result<()> {
         vrf::request_park_event(ctx, guest_id, client_seed)
     }
 
@@ -126,13 +126,18 @@ pub mod solana_city {
     }
 
     // ER: transfer staged VRF prize from venue → guest (call before exit_guest)
-    pub fn apply_vrf_result(ctx: Context<ApplyVrfResult>, _guest_id: u32, _venue_id: u32) -> Result<()> {
+    pub fn apply_vrf_result(ctx: Context<ApplyVrfResult>, park_id: u32, guest_id: u32, venue_id: u32) -> Result<()> {
         vrf::apply_vrf_result(ctx)
     }
 
+    // ── Milestone Badges ─────────────────────────────────────────────────
+    pub fn claim_badge(ctx: Context<ClaimBadge>, park_id: u32, tier: u8) -> Result<()> {
+        badges::claim_badge(ctx, park_id, tier)
+    }
+
     // ── Crank (ER automated task) ─────────────────────────────────────────
-    pub fn schedule_park_crank(ctx: Context<ScheduleParkCrank>, args: ScheduleCrankArgs) -> Result<()> {
-        crank::schedule_park_crank(ctx, args)
+    pub fn schedule_park_crank(ctx: Context<ScheduleParkCrank>, park_id: u32, args: ScheduleCrankArgs) -> Result<()> {
+        crank::schedule_park_crank(ctx, park_id, args)
     }
 
     // Called automatically every 30s by the ER — do not call manually

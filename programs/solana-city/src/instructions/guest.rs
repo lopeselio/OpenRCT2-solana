@@ -8,6 +8,7 @@ use crate::errors::CityError;
 // Called when a guest buys a park ticket — base layer
 pub fn register_guest(
     ctx: Context<RegisterGuest>,
+    _park_id: u32,
     guest_id: u32,
     initial_balance: u64,
 ) -> Result<()> {
@@ -24,16 +25,17 @@ pub fn register_guest(
     city.total_guests_ever += 1;
     city.active_guests += 1;
 
-    msg!("Guest {} entered with {} PARK", guest_id, initial_balance);
+    msg!("Guest {} entered park {} with {} PARK", guest_id, _park_id, initial_balance);
     Ok(())
 }
 
 // Delegate guest PDA to ER — base layer (then all operations go to ER)
-pub fn delegate_guest(ctx: Context<DelegateGuest>, guest_id: u32) -> Result<()> {
+pub fn delegate_guest(ctx: Context<DelegateGuest>, park_id: u32, guest_id: u32) -> Result<()> {
+    let park_bytes = park_id.to_le_bytes();
     let id_bytes = guest_id.to_le_bytes();
     ctx.accounts.delegate_guest(
         &ctx.accounts.payer,
-        &[b"guest", id_bytes.as_ref()],
+        &[b"guest", park_bytes.as_ref(), id_bytes.as_ref()],
         DelegateConfig::default(),
     )?;
     Ok(())
@@ -42,6 +44,7 @@ pub fn delegate_guest(ctx: Context<DelegateGuest>, guest_id: u32) -> Result<()> 
 // Guest spends at a venue — ephemeral rollup (~10-50ms)
 pub fn spend(
     ctx: Context<Spend>,
+    _park_id: u32,
     _guest_id: u32,
     _venue_id: u32,
     amount: u64,
@@ -64,7 +67,7 @@ pub fn spend(
 // Claim any pending VRF prize and finalize guest exit — base layer
 // Called after exit_guest returns the account to the base layer.
 // Sets is_active = false (exit_guest cannot do this — see its docs).
-pub fn claim_prize(ctx: Context<ClaimPrize>, _guest_id: u32) -> Result<()> {
+pub fn claim_prize(ctx: Context<ClaimPrize>, _park_id: u32, _guest_id: u32) -> Result<()> {
     let guest = &mut ctx.accounts.guest;
     let city = &mut ctx.accounts.city;
 
@@ -121,17 +124,17 @@ pub fn exit_guest(ctx: Context<ExitGuest>) -> Result<()> {
 // ─── Contexts ──────────────────────────────────────────────────────────────
 
 #[derive(Accounts)]
-#[instruction(guest_id: u32)]
+#[instruction(park_id: u32, guest_id: u32)]
 pub struct RegisterGuest<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
-    #[account(mut, seeds = [b"city"], bump = city.bump)]
+    #[account(mut, seeds = [b"city", park_id.to_le_bytes().as_ref()], bump = city.bump)]
     pub city: Account<'info, CityState>,
     #[account(
         init,
         payer = payer,
         space = GuestAccount::LEN,
-        seeds = [b"guest", guest_id.to_le_bytes().as_ref()],
+        seeds = [b"guest", park_id.to_le_bytes().as_ref(), guest_id.to_le_bytes().as_ref()],
         bump,
     )]
     pub guest: Account<'info, GuestAccount>,
@@ -140,34 +143,34 @@ pub struct RegisterGuest<'info> {
 
 #[delegate]
 #[derive(Accounts)]
-#[instruction(guest_id: u32)]
+#[instruction(park_id: u32, guest_id: u32)]
 pub struct DelegateGuest<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
     /// CHECK: PDA to delegate to ER
-    #[account(mut, del, seeds = [b"guest", guest_id.to_le_bytes().as_ref()], bump)]
+    #[account(mut, del, seeds = [b"guest", park_id.to_le_bytes().as_ref(), guest_id.to_le_bytes().as_ref()], bump)]
     pub guest: AccountInfo<'info>,
 }
 
 #[derive(Accounts)]
-#[instruction(guest_id: u32, venue_id: u32)]
+#[instruction(park_id: u32, guest_id: u32, venue_id: u32)]
 pub struct Spend<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
-    #[account(mut, seeds = [b"guest", guest_id.to_le_bytes().as_ref()], bump = guest.bump)]
+    #[account(mut, seeds = [b"guest", park_id.to_le_bytes().as_ref(), guest_id.to_le_bytes().as_ref()], bump = guest.bump)]
     pub guest: Account<'info, GuestAccount>,
-    #[account(mut, seeds = [b"venue", venue_id.to_le_bytes().as_ref()], bump = venue.bump)]
+    #[account(mut, seeds = [b"venue", park_id.to_le_bytes().as_ref(), venue_id.to_le_bytes().as_ref()], bump = venue.bump)]
     pub venue: Account<'info, VenueAccount>,
 }
 
 #[derive(Accounts)]
-#[instruction(guest_id: u32)]
+#[instruction(park_id: u32, guest_id: u32)]
 pub struct ClaimPrize<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
-    #[account(mut, seeds = [b"guest", guest_id.to_le_bytes().as_ref()], bump = guest.bump)]
+    #[account(mut, seeds = [b"guest", park_id.to_le_bytes().as_ref(), guest_id.to_le_bytes().as_ref()], bump = guest.bump)]
     pub guest: Account<'info, GuestAccount>,
-    #[account(mut, seeds = [b"city"], bump = city.bump)]
+    #[account(mut, seeds = [b"city", park_id.to_le_bytes().as_ref()], bump = city.bump)]
     pub city: Account<'info, CityState>,
 }
 

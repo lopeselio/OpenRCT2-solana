@@ -116,11 +116,11 @@ pub fn apply_vrf_result(ctx: Context<ApplyVrfResult>) -> Result<()> {
 
 #[vrf]
 #[derive(Accounts)]
-#[instruction(guest_id: u32)]
+#[instruction(park_id: u32, guest_id: u32)]
 pub struct RequestParkEvent<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
-    #[account(mut, seeds = [b"guest", guest_id.to_le_bytes().as_ref()], bump = guest.bump)]
+    #[account(mut, seeds = [b"guest", park_id.to_le_bytes().as_ref(), guest_id.to_le_bytes().as_ref()], bump = guest.bump)]
     pub guest: Account<'info, GuestAccount>,
     #[account(mut)]
     pub venue: Account<'info, VenueAccount>,
@@ -141,15 +141,15 @@ pub struct ConsumeParkEvent<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(guest_id: u32, venue_id: u32)]
+#[instruction(park_id: u32, guest_id: u32, venue_id: u32)]
 pub struct ApplyVrfResult<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
-    #[account(mut, seeds = [b"guest", guest_id.to_le_bytes().as_ref()], bump = guest.bump)]
+    #[account(mut, seeds = [b"guest", park_id.to_le_bytes().as_ref(), guest_id.to_le_bytes().as_ref()], bump = guest.bump)]
     pub guest: Account<'info, GuestAccount>,
     #[account(
         mut,
-        seeds = [b"venue", venue_id.to_le_bytes().as_ref()],
+        seeds = [b"venue", park_id.to_le_bytes().as_ref(), venue_id.to_le_bytes().as_ref()],
         bump = venue.bump,
         constraint = venue.pending_prize_guest_id == guest_id || venue.pending_prize == 0,
     )]

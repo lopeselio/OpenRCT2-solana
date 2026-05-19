@@ -28,18 +28,18 @@ fn harvest(vault: &VenueStakeVault, pos: &mut StakePosition) {
     pos.reward_debt = vault.acc_reward_per_token;
 }
 
-pub fn create_stake_vault(ctx: Context<CreateStakeVault>, venue_id: u32) -> Result<()> {
+pub fn create_stake_vault(ctx: Context<CreateStakeVault>, _park_id: u32, _venue_id: u32) -> Result<()> {
     let vault = &mut ctx.accounts.vault;
-    vault.venue_id = venue_id;
+    vault.venue_id = _venue_id;
     vault.total_staked = 0;
     vault.acc_reward_per_token = 0;
     vault.last_synced_revenue = ctx.accounts.venue.total_revenue;
     vault.bump = ctx.bumps.vault;
-    msg!("Stake vault created for venue {}", venue_id);
+    msg!("Stake vault created for venue {} in park {}", _venue_id, _park_id);
     Ok(())
 }
 
-pub fn stake(ctx: Context<Stake>, venue_id: u32, amount: u64) -> Result<()> {
+pub fn stake(ctx: Context<Stake>, _park_id: u32, _venue_id: u32, amount: u64) -> Result<()> {
     require!(amount > 0, CityError::ZeroStakeAmount);
 
     // Phase 1: sync vault and harvest existing position — drop borrows before CPI
@@ -55,7 +55,7 @@ pub fn stake(ctx: Context<Stake>, venue_id: u32, amount: u64) -> Result<()> {
             harvest(vault, pos);
         } else {
             pos.staker = ctx.accounts.staker.key();
-            pos.venue_id = venue_id;
+            pos.venue_id = _venue_id;
             pos.reward_debt = vault.acc_reward_per_token;
             pos.unclaimed = 0;
             pos.bump = ctx.bumps.position;
@@ -78,11 +78,11 @@ pub fn stake(ctx: Context<Stake>, venue_id: u32, amount: u64) -> Result<()> {
     ctx.accounts.position.amount = ctx.accounts.position.amount.saturating_add(amount);
     ctx.accounts.vault.total_staked = ctx.accounts.vault.total_staked.saturating_add(amount);
 
-    msg!("Staked {} lamports on venue {}", amount, venue_id);
+    msg!("Staked {} lamports on venue {} in park {}", amount, _venue_id, _park_id);
     Ok(())
 }
 
-pub fn unstake(ctx: Context<Unstake>, _venue_id: u32) -> Result<()> {
+pub fn unstake(ctx: Context<Unstake>, _park_id: u32, _venue_id: u32) -> Result<()> {
     // Phase 1: sync and harvest — drop borrows before lamport manipulation
     {
         let current_revenue = ctx.accounts.venue.total_revenue;
@@ -120,11 +120,11 @@ pub fn unstake(ctx: Context<Unstake>, _venue_id: u32) -> Result<()> {
         msg!("Minted {} $PARK rewards on unstake", park_to_mint);
     }
 
-    msg!("Unstaked {} lamports from venue", sol_to_return);
+    msg!("Unstaked {} lamports from venue {} in park {}", sol_to_return, _venue_id, _park_id);
     Ok(())
 }
 
-pub fn claim_stake_rewards(ctx: Context<ClaimStakeRewards>, _venue_id: u32) -> Result<()> {
+pub fn claim_stake_rewards(ctx: Context<ClaimStakeRewards>, _park_id: u32, _venue_id: u32) -> Result<()> {
     {
         let current_revenue = ctx.accounts.venue.total_revenue;
         let vault = &mut ctx.accounts.vault;
@@ -174,7 +174,7 @@ fn mint_park<'info>(
 // ─── Contexts ──────────────────────────────────────────────────────────────
 
 #[derive(Accounts)]
-#[instruction(venue_id: u32)]
+#[instruction(park_id: u32, venue_id: u32)]
 pub struct CreateStakeVault<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
@@ -182,45 +182,45 @@ pub struct CreateStakeVault<'info> {
         init,
         payer = payer,
         space = VenueStakeVault::LEN,
-        seeds = [b"vault", venue_id.to_le_bytes().as_ref()],
+        seeds = [b"vault", park_id.to_le_bytes().as_ref(), venue_id.to_le_bytes().as_ref()],
         bump,
     )]
     pub vault: Account<'info, VenueStakeVault>,
-    #[account(seeds = [b"venue", venue_id.to_le_bytes().as_ref()], bump = venue.bump)]
+    #[account(seeds = [b"venue", park_id.to_le_bytes().as_ref(), venue_id.to_le_bytes().as_ref()], bump = venue.bump)]
     pub venue: Account<'info, VenueAccount>,
     pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
-#[instruction(venue_id: u32)]
+#[instruction(park_id: u32, venue_id: u32)]
 pub struct Stake<'info> {
     #[account(mut)]
     pub staker: Signer<'info>,
-    #[account(mut, seeds = [b"vault", venue_id.to_le_bytes().as_ref()], bump = vault.bump)]
+    #[account(mut, seeds = [b"vault", park_id.to_le_bytes().as_ref(), venue_id.to_le_bytes().as_ref()], bump = vault.bump)]
     pub vault: Account<'info, VenueStakeVault>,
     #[account(
         init_if_needed,
         payer = staker,
         space = StakePosition::LEN,
-        seeds = [b"stake", venue_id.to_le_bytes().as_ref(), staker.key().as_ref()],
+        seeds = [b"stake", park_id.to_le_bytes().as_ref(), venue_id.to_le_bytes().as_ref(), staker.key().as_ref()],
         bump,
     )]
     pub position: Account<'info, StakePosition>,
-    #[account(seeds = [b"venue", venue_id.to_le_bytes().as_ref()], bump = venue.bump)]
+    #[account(seeds = [b"venue", park_id.to_le_bytes().as_ref(), venue_id.to_le_bytes().as_ref()], bump = venue.bump)]
     pub venue: Account<'info, VenueAccount>,
     pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
-#[instruction(venue_id: u32)]
+#[instruction(park_id: u32, venue_id: u32)]
 pub struct Unstake<'info> {
     #[account(mut)]
     pub staker: Signer<'info>,
-    #[account(mut, seeds = [b"vault", venue_id.to_le_bytes().as_ref()], bump = vault.bump)]
+    #[account(mut, seeds = [b"vault", park_id.to_le_bytes().as_ref(), venue_id.to_le_bytes().as_ref()], bump = vault.bump)]
     pub vault: Account<'info, VenueStakeVault>,
-    #[account(mut, seeds = [b"stake", venue_id.to_le_bytes().as_ref(), staker.key().as_ref()], bump = position.bump)]
+    #[account(mut, seeds = [b"stake", park_id.to_le_bytes().as_ref(), venue_id.to_le_bytes().as_ref(), staker.key().as_ref()], bump = position.bump)]
     pub position: Account<'info, StakePosition>,
-    #[account(seeds = [b"venue", venue_id.to_le_bytes().as_ref()], bump = venue.bump)]
+    #[account(seeds = [b"venue", park_id.to_le_bytes().as_ref(), venue_id.to_le_bytes().as_ref()], bump = venue.bump)]
     pub venue: Account<'info, VenueAccount>,
     #[account(mut, seeds = [b"park_mint"], bump)]
     pub park_mint: Account<'info, Mint>,
@@ -237,15 +237,15 @@ pub struct Unstake<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(venue_id: u32)]
+#[instruction(park_id: u32, venue_id: u32)]
 pub struct ClaimStakeRewards<'info> {
     #[account(mut)]
     pub staker: Signer<'info>,
-    #[account(mut, seeds = [b"vault", venue_id.to_le_bytes().as_ref()], bump = vault.bump)]
+    #[account(mut, seeds = [b"vault", park_id.to_le_bytes().as_ref(), venue_id.to_le_bytes().as_ref()], bump = vault.bump)]
     pub vault: Account<'info, VenueStakeVault>,
-    #[account(mut, seeds = [b"stake", venue_id.to_le_bytes().as_ref(), staker.key().as_ref()], bump = position.bump)]
+    #[account(mut, seeds = [b"stake", park_id.to_le_bytes().as_ref(), venue_id.to_le_bytes().as_ref(), staker.key().as_ref()], bump = position.bump)]
     pub position: Account<'info, StakePosition>,
-    #[account(seeds = [b"venue", venue_id.to_le_bytes().as_ref()], bump = venue.bump)]
+    #[account(seeds = [b"venue", park_id.to_le_bytes().as_ref(), venue_id.to_le_bytes().as_ref()], bump = venue.bump)]
     pub venue: Account<'info, VenueAccount>,
     #[account(mut, seeds = [b"park_mint"], bump)]
     pub park_mint: Account<'info, Mint>,

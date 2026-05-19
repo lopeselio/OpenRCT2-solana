@@ -3,6 +3,7 @@ use anchor_lang::prelude::*;
 // Park-wide singleton — lives on base layer, never delegated
 #[account]
 pub struct CityState {
+    pub park_id: u32,
     pub authority: Pubkey,
     pub name: [u8; 32],
     pub total_guests_ever: u64,
@@ -14,7 +15,7 @@ pub struct CityState {
 }
 
 impl CityState {
-    pub const LEN: usize = 8 + 32 + 32 + 8 + 4 + 8 + 4 + 4 + 1;
+    pub const LEN: usize = 8 + 4 + 32 + 32 + 8 + 4 + 8 + 4 + 4 + 1; // 105
 }
 
 // Per-guest account — delegated to ER when guest is in the park
@@ -83,6 +84,19 @@ pub struct StakePosition {
 
 impl StakePosition {
     pub const LEN: usize = 8 + 32 + 4 + 8 + 16 + 8 + 1; // 77
+}
+
+// Milestone badge — one PDA per city per tier (base layer)
+#[account]
+pub struct BadgeAccount {
+    pub city: Pubkey,
+    pub tier: u8,           // 0=Bronze 1=Silver 2=Gold 3=Diamond
+    pub awarded_at: i64,    // unix timestamp
+    pub bump: u8,
+}
+
+impl BadgeAccount {
+    pub const LEN: usize = 8 + 32 + 1 + 8 + 1; // 50
 }
 
 // Leaderboard — top 10 parks by revenue (optional, base layer)

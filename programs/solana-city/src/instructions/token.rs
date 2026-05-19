@@ -61,7 +61,9 @@ pub struct InitializeParkMint<'info> {
 pub struct RedeemBalance<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
-    #[account(mut, seeds = [b"guest", guest_id.to_le_bytes().as_ref()], bump = guest.bump)]
+    // guest PDA — no seeds constraint; caller provides the correct park-scoped address.
+    // Anchor validates discriminator (account type) only.
+    #[account(mut)]
     pub guest: Account<'info, GuestAccount>,
     #[account(mut, seeds = [b"park_mint"], bump)]
     pub park_mint: Account<'info, Mint>,
