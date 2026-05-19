@@ -127,71 +127,99 @@ Maximum score is 1000.
 
 ---
 
-## 🔜 Designed: Next Priorities
+## ✅ Built: DeFi & Social Layer
 
 ### 9. $PARK SPL Token Integration
-**What it does:** Replace the internal `balance: u64` with a real SPL token
-mint. Guests would hold actual $PARK token accounts that show up in wallets.
+**What it does:** Guests accumulate an internal `balance: u64` (in PARK units)
+during gameplay on the Ephemeral Rollup. On exit, `redeem_balance` converts
+that balance into real **$PARK SPL tokens** in the caller's ATA.
 
-**Why it matters:** The token becomes tradable. You could buy park tickets from
-a DEX. Revenue goes to a real token treasury visible on chain explorers.
+**Why it matters:** The token is a real SPL asset — it appears in wallets and
+on chain explorers. The ER keeps speed high (no SPL CPI in the hot path),
+while the base layer handles final minting.
 
-**What's needed:**
-- Add `anchor-spl` dependency
-- Create a `ParkMint` PDA at city initialization
-- Change `register_guest` to mint $PARK to a guest-owned ATA
-- Change `spend` to move real SPL tokens between ATAs
+**How it works:**
+- `initialize_park_mint` creates a self-authority PDA mint (`[b"park_mint"]`)
+- `redeem_balance(guest_id)` requires guest to be inactive; mints `balance` tokens
+- Sidecar calls `redeemBalance` automatically on every `GUEST_EXIT` event
+- Staking rewards also mint $PARK via `unstake` and `claim_stake_rewards`
 
 ---
 
 ### 10. On-Chain Leaderboard
 **What it does:** A `Leaderboard` PDA tracks the top 10 parks by total revenue.
-Parks can "register" themselves to appear on a global on-chain ranking.
+Any park can call `submit_score` to upsert their entry — the leaderboard
+stays sorted descending.
 
-**Why it matters:** Multiple people running their own Solana City parks could
-compete for the top spot. Fully on-chain, no server.
+**Why it matters:** Multiple Solana City parks can compete for the top spot.
+Fully on-chain, no server.
 
-**Status:** `Leaderboard` struct is defined in `state.rs`, instruction not yet written.
+**How it works:**
+- `initialize_leaderboard` creates the singleton PDA `[b"leaderboard"]`
+- `submit_score` upserts the city entry, evicts the lowest if full, sorts descending
+- Sidecar can call this on a timer or after significant revenue milestones
 
 ---
 
 ### 11. Ride Revenue Staking
-**What it does:** Any wallet can stake SOL on a specific ride. When the ride
-earns revenue, stakers get a percentage share.
+**What it does:** Any wallet can stake SOL on a specific venue. When the venue
+earns revenue (via guest spending), stakers earn $PARK proportional to their
+share of the stake.
 
-**Why it matters:** Turns the game into a DeFi primitive. You could become
-an investor in someone's virtual roller coaster. Revenue auto-distributes
-on-chain.
+**Why it matters:** Turns the game into a DeFi primitive — become an investor
+in someone's virtual roller coaster. Revenue auto-distributes on-chain.
 
-**What's needed:**
-- `StakePosition` PDA per (staker, venue)
-- `stake_on_venue(venueId, amount)` instruction
-- Modify `spend` to split revenue between venue and stakers
-- `claim_stake_rewards(venueId)` instruction
+**How it works:**
+- `create_stake_vault(venueId)` — one vault PDA per venue
+- `stake(venueId, amount)` — deposits SOL, inits position if new
+- Accumulator pattern: `acc_reward_per_token` grows with each revenue delta
+- `claim_stake_rewards(venueId)` — harvests $PARK without unstaking
+- `unstake(venueId)` — returns SOL + mints any remaining $PARK rewards
 
 ---
 
 ### 12. Park Milestone Badges
-**What it does:** When a park hits a milestone (1,000 guests, 1,000,000 $PARK
-revenue, etc.), an on-chain badge is minted using Metaplex.
+**What it does:** When a park hits a guest-count milestone, an on-chain
+`BadgeAccount` PDA is created — a permanent proof of achievement.
 
-**Why it matters:** Permanent proof of achievement. Badge NFTs appear in
-the park owner's wallet.
+**Why it matters:** Badges are composable on-chain records. Any wallet or
+dApp can query whether a park has earned a specific tier.
 
-**Milestones:**
-- 100 guests: Bronze badge
-- 1,000 guests: Silver badge  
-- 10,000 guests: Gold badge
-- 1M $PARK revenue: Diamond badge
+**Tiers (by `total_guests_ever`):**
+- Bronze (tier 0): 5 guests
+- Silver (tier 1): 25 guests
+- Gold (tier 2): 100 guests
+- Diamond (tier 3): 500 guests
+
+**How it works:**
+- `claim_badge(tier)` — creates PDA `[b"badge", city_key, tier_byte]`
+- Attempting to re-claim the same tier fails (PDA already initialized)
+- No Metaplex dependency — simple on-chain record, easy to extend
 
 ---
 
-## 💡 Future Ideas
+## ✅ Built: Multi-Park World
 
 ### 13. Multi-Park World
-Multiple Solana City parks on the same program. Parks can see each other's
-guest counts, revenue, and park scores. Guests could "travel" between parks
-(undelegate from one city's ER, re-delegate in another).
+Multiple independent parks run under one deployed program, each identified
+by a `park_id: u32`. Every city, guest, venue, vault, and stake PDA is
+namespaced by `park_id` in its seeds.
+
+**Guest travel:** a guest that exits park 1 can be registered in park 2 with
+the same `guest_id`. Their $PARK SPL tokens (in their wallet ATA) carry over
+automatically — the token mint is global, not park-scoped.
+
+**Sidecar:** reads `PARK_ID` from the environment (default 1). To run a second
+park, launch a second sidecar with `PARK_ID=2 npm start`.
+
+**Implementation:**
+- All seeds updated: `[b"city", park_id_le]`, `[b"guest", park_id_le, guest_id_le]`, etc.
+- `CityState` stores `park_id` for easy querying
+- Every instruction takes `park_id: u32` as first arg (ER instructions that rely on
+  external account passing use unconstrained `AccountInfo` and don't need seeds)
+- `AutoParkTick` uses no seeds — the specific city key is baked in at crank schedule time
+
+## 💡 Future Ideas
 
 ### 14. Weather Oracle (Pyth/Switchboard)
 Pull real-world weather data on-chain. Rainy day in the player's city → 
@@ -221,11 +249,11 @@ target, hire more staff". Claude becomes an on-chain-aware park manager.
 | 6 | VRF random events | ✅ Built | `instructions/vrf.rs` |
 | 7 | Ride repair mechanic | ✅ Built | `instructions/venue.rs` |
 | 8 | Park crank (auto-tick) | ✅ Built | `instructions/crank.rs` |
-| 9 | $PARK SPL token | 🔜 Next | needs `anchor-spl` |
-| 10 | Leaderboard | 🔜 Next | struct ready, instruction pending |
-| 11 | Ride revenue staking | 🔜 Future | |
-| 12 | Milestone badges (NFTs) | 🔜 Future | |
-| 13 | Multi-park world | 💡 Idea | |
+| 9 | $PARK SPL token | ✅ Built | `instructions/token.rs` |
+| 10 | Leaderboard | ✅ Built | `instructions/leaderboard.rs` |
+| 11 | Ride revenue staking | ✅ Built | `instructions/staking.rs` |
+| 12 | Milestone badges | ✅ Built | `instructions/badges.rs` |
+| 13 | Multi-park world | ✅ Built | park_id seeds across all instructions |
 | 14 | Weather oracle | 💡 Idea | |
 | 15 | Park bonds | 💡 Idea | |
 | 16 | Claude Code park manager | 💡 Idea | |
