@@ -31,6 +31,11 @@ pub mod solana_city {
         guest::delegate_guest(ctx, park_id, guest_id)
     }
 
+    // Re-entry on an existing guest PDA — base layer
+    pub fn reactivate_guest(ctx: Context<ReactivateGuest>, park_id: u32, guest_id: u32) -> Result<()> {
+        guest::reactivate_guest(ctx, park_id, guest_id)
+    }
+
     // ER: guest pays at a venue
     pub fn spend(ctx: Context<Spend>, park_id: u32, guest_id: u32, venue_id: u32, amount: u64, category: u8) -> Result<()> {
         guest::spend(ctx, park_id, guest_id, venue_id, amount, category)

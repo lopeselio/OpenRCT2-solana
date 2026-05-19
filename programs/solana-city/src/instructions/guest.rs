@@ -29,6 +29,33 @@ pub fn register_guest(
     Ok(())
 }
 
+// Re-entry on an existing guest PDA — base layer.
+// Asserts the guest is currently inactive (cleanly exited previously),
+// flips is_active back on, bumps active_guests, and refreshes entry_time.
+// Balance and total_spent carry over from the prior visit by design.
+pub fn reactivate_guest(
+    ctx: Context<ReactivateGuest>,
+    _park_id: u32,
+    _guest_id: u32,
+) -> Result<()> {
+    let guest = &mut ctx.accounts.guest;
+    require!(!guest.is_active, CityError::GuestAlreadyActive);
+
+    guest.is_active = true;
+    guest.entry_time = Clock::get()?.unix_timestamp;
+
+    let city = &mut ctx.accounts.city;
+    city.active_guests += 1;
+
+    msg!(
+        "Guest {} re-entered park {} with carry-over balance {}",
+        guest.guest_id,
+        _park_id,
+        guest.balance
+    );
+    Ok(())
+}
+
 // Delegate guest PDA to ER — base layer (then all operations go to ER)
 pub fn delegate_guest(ctx: Context<DelegateGuest>, park_id: u32, guest_id: u32) -> Result<()> {
     let park_bytes = park_id.to_le_bytes();
@@ -139,6 +166,17 @@ pub struct RegisterGuest<'info> {
     )]
     pub guest: Account<'info, GuestAccount>,
     pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+#[instruction(park_id: u32, guest_id: u32)]
+pub struct ReactivateGuest<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    #[account(mut, seeds = [b"city", park_id.to_le_bytes().as_ref()], bump = city.bump)]
+    pub city: Account<'info, CityState>,
+    #[account(mut, seeds = [b"guest", park_id.to_le_bytes().as_ref(), guest_id.to_le_bytes().as_ref()], bump = guest.bump)]
+    pub guest: Account<'info, GuestAccount>,
 }
 
 #[delegate]

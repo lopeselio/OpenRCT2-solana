@@ -22,4 +22,6 @@ pub enum CityError {
     InvalidBadgeTier,
     #[msg("City has not yet reached the threshold for this badge")]
     BadgeThresholdNotMet,
+    #[msg("Guest is already active — call exit + claim_prize first")]
+    GuestAlreadyActive,
 }
