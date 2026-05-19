@@ -33,6 +33,7 @@
 #include "core/String.hpp"
 #include "entity/EntityList.h"
 #include "entity/EntityRegistry.h"
+#include "scripting/ChainOutbox.h"
 #include "entity/PatrolArea.h"
 #include "entity/Peep.h"
 #include "entity/Staff.h"
@@ -356,6 +357,11 @@ void GameFixSaveVars()
 void GameLoadInit()
 {
     auto* context = GetContext();
+
+    auto outboxPath = Path::Combine(
+        context->GetPlatformEnvironment().GetDirectoryPath(DirBase::user),
+        u8"chain-outbox.ndjson");
+    OpenRCT2::Scripting::ChainOutbox::Get().Open(outboxPath);
 
     IGameStateSnapshots* snapshots = context->GetGameStateSnapshots();
     snapshots->Reset();
