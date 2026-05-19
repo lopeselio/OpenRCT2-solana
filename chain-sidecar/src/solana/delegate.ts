@@ -15,13 +15,13 @@ import {
   erConnection,
   wallet,
 } from "./clients";
-import { cityPda, guestPda, venuePda, PROGRAM_ID } from "./accounts";
+import { cityPda, guestPda, venuePda, PROGRAM_ID, PARK_ID } from "./accounts";
 
 // Module-level program instances — initialized once via initPrograms().
 let baseProgram: Program;
 let erProgram: Program;
 
-// Call once after loading the IDL. In Anchor 0.30+, Program takes (idl, provider)
+// Call once after loading the IDL. In Anchor 0.32, Program takes (idl, provider)
 // and reads the program ID from the IDL — the old 3-arg form is gone.
 export function initPrograms(idl: any): void {
   baseProgram = new Program(idl, baseProvider);
@@ -75,19 +75,18 @@ export async function onGuestEntry(
   cash: string
 ): Promise<void> {
   const initialBalance = parkToUnits(cash);
-  const [city] = cityPda();
   const [guest] = guestPda(guestId);
 
-  console.log(`[chain] Registering guest ${guestId} (${cash} PARK)...`);
+  console.log(`[chain] Registering guest ${guestId} in park ${PARK_ID} (${cash} PARK)...`);
 
   await baseProgram.methods
-    .registerGuest(guestId, new BN(initialBalance.toString()))
-    .accounts({ payer: baseProvider.wallet.publicKey, city, guest, systemProgram: SystemProgram.programId })
+    .registerGuest(PARK_ID, guestId, new BN(initialBalance.toString()))
+    .accounts({ payer: baseProvider.wallet.publicKey })
     .rpc({ skipPreflight: false, commitment: "confirmed" });
 
   await baseProgram.methods
-    .delegateGuest(guestId)
-    .accounts({ payer: baseProvider.wallet.publicKey, guest })
+    .delegateGuest(PARK_ID, guestId)
+    .accounts({ payer: baseProvider.wallet.publicKey })
     .rpc({ skipPreflight: false, commitment: "confirmed" });
 
   await sleep(3000);
@@ -105,16 +104,15 @@ export async function onGuestSpend(
   const [venue] = venuePda(venueId);
 
   await erProgram.methods
-    .spend(guestId, venueId, new BN(amountUnits.toString()), category)
+    .spend(PARK_ID, guestId, venueId, new BN(amountUnits.toString()), category)
     .accounts({ payer: erProvider.wallet.publicKey, guest, venue })
     .rpc({ skipPreflight: true });
 }
 
 export async function onGuestExit(guestId: number): Promise<void> {
   const [guest] = guestPda(guestId);
-  const [city] = cityPda();
 
-  console.log(`[chain] Guest ${guestId} exiting — committing + undelegating...`);
+  console.log(`[chain] Guest ${guestId} exiting park ${PARK_ID} — committing + undelegating...`);
 
   // exitGuest calls commit_and_undelegate — use sendRawTransaction (see comment above).
   const tx = await erProgram.methods
@@ -130,11 +128,21 @@ export async function onGuestExit(guestId: number): Promise<void> {
   // Finalize: clear is_active, decrement active_guests, credit any staged VRF prize.
   // claim_prize is a no-op if pending_prize == 0, so always safe to call.
   await baseProgram.methods
-    .claimPrize(guestId)
-    .accounts({ payer: baseProvider.wallet.publicKey, guest, city })
+    .claimPrize(PARK_ID, guestId)
+    .accounts({ payer: baseProvider.wallet.publicKey })
     .rpc({ commitment: "confirmed" });
 
-  console.log(`[chain] Guest ${guestId} fully exited`);
+  // Mint any remaining internal PARK balance as real $PARK SPL tokens.
+  const guestAcc = await (baseProgram.account as any).guestAccount.fetch(guest);
+  if (guestAcc.balance.gtn(0)) {
+    await baseProgram.methods
+      .redeemBalance(guestId)
+      .accounts({ payer: baseProvider.wallet.publicKey, guest })
+      .rpc({ commitment: "confirmed" });
+    console.log(`[chain] Guest ${guestId} redeemed ${guestAcc.balance.toString()} PARK tokens`);
+  }
+
+  console.log(`[chain] Guest ${guestId} fully exited park ${PARK_ID}`);
 }
 
 // ─── Venue Operations ───────────────────────────────────────────────────────
@@ -144,19 +152,18 @@ export async function onVenueRegistered(
   venueKind: number,
   name: string
 ): Promise<void> {
-  const [city] = cityPda();
   const [venue] = venuePda(venueId);
 
-  console.log(`[chain] Registering venue ${venueId} '${name}'...`);
+  console.log(`[chain] Registering venue ${venueId} '${name}' in park ${PARK_ID}...`);
 
   await baseProgram.methods
-    .registerVenue(venueId, venueKind, name)
-    .accounts({ payer: baseProvider.wallet.publicKey, city, venue, systemProgram: SystemProgram.programId })
+    .registerVenue(PARK_ID, venueId, venueKind, name)
+    .accounts({ payer: baseProvider.wallet.publicKey })
     .rpc({ commitment: "confirmed" });
 
   await baseProgram.methods
-    .delegateVenue(venueId)
-    .accounts({ payer: baseProvider.wallet.publicKey, venue })
+    .delegateVenue(PARK_ID, venueId)
+    .accounts({ payer: baseProvider.wallet.publicKey })
     .rpc({ commitment: "confirmed" });
 
   await sleep(3000);
@@ -169,21 +176,20 @@ export async function onVenueRenamed(
 ): Promise<void> {
   const [venue] = venuePda(venueId);
   await erProgram.methods
-    .renameVenue(venueId, newName)
+    .renameVenue(PARK_ID, venueId, newName)
     .accounts({ payer: erProvider.wallet.publicKey, venue })
     .rpc({ skipPreflight: true });
 }
 
 export async function onVenueRemoved(venueId: number): Promise<void> {
-  const [city] = cityPda();
   const [venue] = venuePda(venueId);
 
-  console.log(`[chain] Removing venue ${venueId}...`);
+  console.log(`[chain] Removing venue ${venueId} from park ${PARK_ID}...`);
 
   // removeVenue calls commit_and_undelegate — use sendRawTransaction (see comment above).
   const tx = await erProgram.methods
-    .removeVenue()
-    .accounts({ payer: erProvider.wallet.publicKey, venue, city })
+    .removeVenue(PARK_ID)
+    .accounts({ payer: erProvider.wallet.publicKey, venue })
     .transaction();
   await sendErRaw(tx);
 
@@ -193,9 +199,9 @@ export async function onVenueRemoved(venueId: number): Promise<void> {
 
   // Finalize: set is_active = false. removeVenue can't do this (ExternalAccountDataModified).
   await baseProgram.methods
-    .deactivateVenue(venueId)
-    .accounts({ payer: baseProvider.wallet.publicKey, venue })
+    .deactivateVenue(PARK_ID, venueId)
+    .accounts({ payer: baseProvider.wallet.publicKey })
     .rpc({ commitment: "confirmed" });
 
-  console.log(`[chain] Venue ${venueId} fully removed`);
+  console.log(`[chain] Venue ${venueId} fully removed from park ${PARK_ID}`);
 }

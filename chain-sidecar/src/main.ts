@@ -8,8 +8,6 @@ import "dotenv/config";
 import * as path from "path";
 import * as fs from "fs";
 import { Program } from "@coral-xyz/anchor";
-import { SystemProgram } from "@solana/web3.js";
-import { BN } from "@coral-xyz/anchor";
 import { followOutbox } from "./outbox/reader";
 import { OutboxEvent, EventKind } from "./outbox/types";
 import { baseProvider, signer } from "./solana/clients";
@@ -22,7 +20,7 @@ import {
   onVenueRenamed,
   onVenueRemoved,
 } from "./solana/delegate";
-import { cityPda } from "./solana/accounts";
+import { cityPda, parkMintPda, PARK_ID } from "./solana/accounts";
 
 const OUTBOX_PATH =
   process.env.OUTBOX_PATH ??
@@ -34,25 +32,37 @@ async function ensureCityInitialized(baseProgram: Program): Promise<void> {
   const [city] = cityPda();
   const info = await baseProvider.connection.getAccountInfo(city);
   if (info !== null) {
-    console.log("[chain] City already initialized on-chain");
+    console.log(`[chain] Park ${PARK_ID} already initialized on-chain`);
     return;
   }
 
-  console.log(`[chain] Initializing '${CITY_NAME}' on Solana...`);
+  console.log(`[chain] Initializing '${CITY_NAME}' (park_id=${PARK_ID}) on Solana...`);
   await baseProgram.methods
-    .initializeCity(CITY_NAME)
-    .accounts({
-      authority: signer.publicKey,
-      city,
-      systemProgram: SystemProgram.programId,
-    })
+    .initializeCity(PARK_ID, CITY_NAME)
+    .accounts({ authority: signer.publicKey })
     .rpc({ commitment: "confirmed" });
-  console.log("[chain] City initialized:", city.toBase58());
+  console.log(`[chain] Park ${PARK_ID} initialized:`, city.toBase58());
+}
+
+async function ensureParkMintInitialized(baseProgram: Program): Promise<void> {
+  const [mint] = parkMintPda();
+  const info = await baseProvider.connection.getAccountInfo(mint);
+  if (info !== null) {
+    console.log("[chain] $PARK mint already initialized");
+    return;
+  }
+  console.log("[chain] Initializing $PARK mint...");
+  await baseProgram.methods
+    .initializeParkMint()
+    .accounts({ payer: signer.publicKey })
+    .rpc({ commitment: "confirmed" });
+  console.log("[chain] $PARK mint initialized:", mint.toBase58());
 }
 
 async function main() {
   console.log("=== Solana City Chain Sidecar ===");
   console.log("Wallet:", signer.publicKey.toBase58());
+  console.log("Park ID:", PARK_ID);
   console.log("Outbox:", OUTBOX_PATH);
 
   // Load IDL and initialize both base + ER program instances
@@ -64,9 +74,10 @@ async function main() {
   );
   initPrograms(idl);
 
-  // baseProgram for city init check only — delegate.ts owns the program instances
+  // baseProgram for setup checks only — delegate.ts owns the program instances
   const baseProgram = new Program(idl, baseProvider);
   await ensureCityInitialized(baseProgram);
+  await ensureParkMintInitialized(baseProgram);
 
   // Queue for sequential processing — prevents race conditions on the same PDA
   const eventQueue: OutboxEvent[] = [];
