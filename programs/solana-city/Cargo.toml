@@ -14,7 +14,7 @@ cpi = ["no-entrypoint"]
 no-entrypoint = []
 no-idl = []
 no-log-ix-name = []
-idl-build = ["anchor-lang/idl-build"]
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
 anchor-debug = []
 custom-heap = []
 custom-panic = []
@@ -22,6 +22,7 @@ custom-panic = []
 
 [dependencies]
 anchor-lang = { version = "0.32.1", features = ["init-if-needed"] }
+anchor-spl = { version = "0.32.1", features = ["token", "associated_token"] }
 ephemeral-rollups-sdk = { version = "0.11.1", features = ["anchor", "disable-realloc"] }
 ephemeral-vrf-sdk = { version = "0.2.3", features = ["anchor"] }
 magicblock-magic-program-api = { version = "0.8.5", default-features = false }

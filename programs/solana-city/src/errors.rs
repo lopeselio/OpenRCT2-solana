@@ -12,4 +12,10 @@ pub enum CityError {
     VenueBroken,
     #[msg("Name too long (max 32 bytes)")]
     NameTooLong,
+    #[msg("Guest is still active — must exit before redeeming tokens")]
+    GuestStillActive,
+    #[msg("Stake amount must be greater than zero")]
+    ZeroStakeAmount,
+    #[msg("No staked position to withdraw")]
+    NoStakeToWithdraw,
 }

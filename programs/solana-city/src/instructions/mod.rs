@@ -1,6 +1,8 @@
 pub mod city;
 pub mod guest;
 pub mod leaderboard;
+pub mod staking;
+pub mod token;
 pub mod venue;
 pub mod vrf;
 pub mod crank;
@@ -8,6 +10,8 @@ pub mod crank;
 pub use city::*;
 pub use guest::*;
 pub use leaderboard::*;
+pub use staking::*;
+pub use token::*;
 pub use venue::*;
 pub use vrf::*;
 pub use crank::*;

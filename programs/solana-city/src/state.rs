@@ -56,6 +56,35 @@ impl VenueAccount {
     pub const LEN: usize = 8 + 4 + 1 + 32 + 8 + 1 + 1 + 1 + 8 + 4;
 }
 
+// SOL vault holding staked lamports for a venue — base layer only
+#[account]
+pub struct VenueStakeVault {
+    pub venue_id: u32,
+    pub total_staked: u64,           // total SOL staked (lamports)
+    pub acc_reward_per_token: u128,  // accumulated PARK per staked lamport (scaled 1e9)
+    pub last_synced_revenue: u64,    // venue.total_revenue at last sync
+    pub bump: u8,
+}
+
+impl VenueStakeVault {
+    pub const LEN: usize = 8 + 4 + 8 + 16 + 8 + 1; // 45
+}
+
+// Per-staker position for a venue — base layer only
+#[account]
+pub struct StakePosition {
+    pub staker: Pubkey,
+    pub venue_id: u32,
+    pub amount: u64,       // SOL staked (lamports)
+    pub reward_debt: u128, // acc_reward_per_token at last checkpoint
+    pub unclaimed: u64,    // accumulated PARK rewards not yet minted
+    pub bump: u8,
+}
+
+impl StakePosition {
+    pub const LEN: usize = 8 + 32 + 4 + 8 + 16 + 8 + 1; // 77
+}
+
 // Leaderboard — top 10 parks by revenue (optional, base layer)
 #[account]
 pub struct Leaderboard {
