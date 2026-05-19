@@ -2,6 +2,11 @@ import * as anchor from "@coral-xyz/anchor";
 import { BN, Program } from "@coral-xyz/anchor";
 import { SolanaCity } from "../target/types/solana_city";
 import { assert } from "chai";
+import {
+  getAssociatedTokenAddressSync,
+  TOKEN_PROGRAM_ID,
+  ASSOCIATED_TOKEN_PROGRAM_ID,
+} from "@solana/spl-token";
 
 // Tests cover the base-layer instructions that run on localnet.
 // Instructions that require the MagicBlock Ephemeral Rollup or VRF oracle
@@ -26,6 +31,29 @@ describe("solana-city", () => {
     [Buffer.from("leaderboard")],
     program.programId
   );
+
+  const [parkMintPda] = anchor.web3.PublicKey.findProgramAddressSync(
+    [Buffer.from("park_mint")],
+    program.programId
+  );
+
+  function vaultPda(venueId: number): anchor.web3.PublicKey {
+    const buf = Buffer.alloc(4);
+    buf.writeUInt32LE(venueId);
+    return anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("vault"), buf],
+      program.programId
+    )[0];
+  }
+
+  function stakePda(venueId: number, staker: anchor.web3.PublicKey): anchor.web3.PublicKey {
+    const buf = Buffer.alloc(4);
+    buf.writeUInt32LE(venueId);
+    return anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("stake"), buf, staker.toBuffer()],
+      program.programId
+    )[0];
+  }
 
   function guestPda(guestId: number): anchor.web3.PublicKey {
     const buf = Buffer.alloc(4);
@@ -361,6 +389,197 @@ describe("solana-city", () => {
       // guest 42 was exited (active_guests=0), then 10 new guests registered → 10 active
       // bonus = min(10, 200) = 10 → score = 500 + 10 + 0 = 510
       assert.equal(city.parkScore, 510);
+    });
+  });
+
+  // ── $PARK SPL Token ───────────────────────────────────────────────────────
+
+  describe("initialize_park_mint", () => {
+    it("creates the $PARK mint PDA with 6 decimals", async () => {
+      await program.methods
+        .initializeParkMint()
+        .accounts({
+          payer: payer.publicKey,
+          parkMint: parkMintPda,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .signers([payer])
+        .rpc();
+
+      const mintInfo = await provider.connection.getAccountInfo(parkMintPda);
+      assert.isNotNull(mintInfo, "$PARK mint account should exist");
+    });
+  });
+
+  describe("redeem_balance", () => {
+    it("mints $PARK tokens equal to guest balance and zeroes the balance", async () => {
+      // guest 42 is inactive (exited via claim_prize) with balance = 4_000_000
+      const stakerAta = getAssociatedTokenAddressSync(parkMintPda, payer.publicKey);
+
+      await program.methods
+        .redeemBalance(42)
+        .accounts({
+          payer: payer.publicKey,
+          guest: guestPda(42),
+          parkMint: parkMintPda,
+          recipientAta: stakerAta,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .signers([payer])
+        .rpc();
+
+      const ata = await provider.connection.getTokenAccountBalance(stakerAta);
+      assert.equal(ata.value.amount, "4000000", "ATA should hold 4M $PARK");
+
+      const guestAfter = await program.account.guestAccount.fetch(guestPda(42));
+      assert.isTrue(guestAfter.balance.eqn(0), "guest.balance should be zeroed");
+    });
+
+    it("rejects redeem when guest is still active", async () => {
+      // guest 1000 is still active
+      const stakerAta = getAssociatedTokenAddressSync(parkMintPda, payer.publicKey);
+      try {
+        await program.methods
+          .redeemBalance(1000)
+          .accounts({
+            payer: payer.publicKey,
+            guest: guestPda(1000),
+            parkMint: parkMintPda,
+            recipientAta: stakerAta,
+            tokenProgram: TOKEN_PROGRAM_ID,
+            associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+            systemProgram: anchor.web3.SystemProgram.programId,
+          })
+          .signers([payer])
+          .rpc();
+        assert.fail("expected GuestStillActive error");
+      } catch (err: any) {
+        assert.include(err.message, "GuestStillActive");
+      }
+    });
+  });
+
+  // ── Ride Revenue Staking ──────────────────────────────────────────────────
+
+  describe("create_stake_vault", () => {
+    it("creates vault for venue 1 seeded with current revenue", async () => {
+      await program.methods
+        .createStakeVault(1)
+        .accounts({
+          payer: payer.publicKey,
+          vault: vaultPda(1),
+          venue: venuePda(1),
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .signers([payer])
+        .rpc();
+
+      const vault = await program.account.venueStakeVault.fetch(vaultPda(1));
+      assert.equal(vault.venueId, 1);
+      assert.isTrue(vault.totalStaked.eqn(0));
+    });
+  });
+
+  describe("stake / claim_stake_rewards / unstake", () => {
+    const STAKE_AMOUNT = new BN(1_000_000); // 1M lamports
+    const SPEND_AMOUNT = new BN(500_000);   // 0.5M PARK
+
+    it("stakes SOL and increases vault total_staked", async () => {
+      await program.methods
+        .stake(1, STAKE_AMOUNT)
+        .accounts({
+          staker: payer.publicKey,
+          vault: vaultPda(1),
+          position: stakePda(1, payer.publicKey),
+          venue: venuePda(1),
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .signers([payer])
+        .rpc();
+
+      const vault = await program.account.venueStakeVault.fetch(vaultPda(1));
+      assert.isTrue(vault.totalStaked.eq(STAKE_AMOUNT));
+
+      const pos = await program.account.stakePosition.fetch(stakePda(1, payer.publicKey));
+      assert.isTrue(pos.amount.eq(STAKE_AMOUNT));
+    });
+
+    it("generates rewards after venue earns revenue (spend by guest 1000)", async () => {
+      // guest 1000 is active with 1_000_000 balance; spend 500_000 at venue 1
+      await program.methods
+        .spend(1000, 1, SPEND_AMOUNT, 0)
+        .accounts({
+          payer: payer.publicKey,
+          guest: guestPda(1000),
+          venue: venuePda(1),
+        })
+        .signers([payer])
+        .rpc();
+
+      const venue = await program.account.venueAccount.fetch(venuePda(1));
+      // venue 1 had 1_000_000 revenue before; now 1_500_000
+      assert.isTrue(venue.totalRevenue.eqn(1_500_000));
+    });
+
+    it("claim_stake_rewards mints $PARK proportional to revenue since stake", async () => {
+      const stakerAta = getAssociatedTokenAddressSync(parkMintPda, payer.publicKey);
+      const ataBefore = await provider.connection.getTokenAccountBalance(stakerAta);
+      const balanceBefore = BigInt(ataBefore.value.amount);
+
+      await program.methods
+        .claimStakeRewards(1)
+        .accounts({
+          staker: payer.publicKey,
+          vault: vaultPda(1),
+          position: stakePda(1, payer.publicKey),
+          venue: venuePda(1),
+          parkMint: parkMintPda,
+          stakerAta,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .signers([payer])
+        .rpc();
+
+      const ataAfter = await provider.connection.getTokenAccountBalance(stakerAta);
+      const balanceAfter = BigInt(ataAfter.value.amount);
+      // Staker holds 100% of stake → reward = all 500_000 PARK of new revenue
+      assert.equal(balanceAfter - balanceBefore, BigInt(500_000));
+    });
+
+    it("unstake returns SOL and position.amount is zeroed", async () => {
+      const stakerAta = getAssociatedTokenAddressSync(parkMintPda, payer.publicKey);
+      const solBefore = await provider.connection.getBalance(payer.publicKey);
+
+      await program.methods
+        .unstake(1)
+        .accounts({
+          staker: payer.publicKey,
+          vault: vaultPda(1),
+          position: stakePda(1, payer.publicKey),
+          venue: venuePda(1),
+          parkMint: parkMintPda,
+          stakerAta,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .signers([payer])
+        .rpc();
+
+      const pos = await program.account.stakePosition.fetch(stakePda(1, payer.publicKey));
+      assert.isTrue(pos.amount.eqn(0), "position should be zeroed after unstake");
+
+      const vault = await program.account.venueStakeVault.fetch(vaultPda(1));
+      assert.isTrue(vault.totalStaked.eqn(0), "vault total_staked should be zero");
+
+      // SOL should be roughly returned (minus tx fees)
+      const solAfter = await provider.connection.getBalance(payer.publicKey);
+      assert.isAbove(solAfter, solBefore - 10_000, "staker should receive SOL back");
     });
   });
 
