@@ -2,11 +2,7 @@ import * as anchor from "@coral-xyz/anchor";
 import { BN, Program } from "@coral-xyz/anchor";
 import { SolanaCity } from "../target/types/solana_city";
 import { assert } from "chai";
-import {
-  getAssociatedTokenAddressSync,
-  TOKEN_PROGRAM_ID,
-  ASSOCIATED_TOKEN_PROGRAM_ID,
-} from "@solana/spl-token";
+import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 
 // Tests cover the base-layer instructions that run on localnet.
 // Instructions that require the MagicBlock Ephemeral Rollup or VRF oracle
@@ -21,6 +17,9 @@ describe("solana-city", () => {
   const payer = (provider.wallet as anchor.Wallet).payer;
 
   // ── PDA helpers ─────────────────────────────────────────────────────────
+  // These are only used for fetching account state after instructions.
+  // Anchor 0.32 auto-derives PDAs with seeds from the IDL — do NOT pass them
+  // in .accounts({}) or TypeScript will report "unknown property" errors.
 
   const [cityPda] = anchor.web3.PublicKey.findProgramAddressSync(
     [Buffer.from("city")],
@@ -36,24 +35,6 @@ describe("solana-city", () => {
     [Buffer.from("park_mint")],
     program.programId
   );
-
-  function vaultPda(venueId: number): anchor.web3.PublicKey {
-    const buf = Buffer.alloc(4);
-    buf.writeUInt32LE(venueId);
-    return anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("vault"), buf],
-      program.programId
-    )[0];
-  }
-
-  function stakePda(venueId: number, staker: anchor.web3.PublicKey): anchor.web3.PublicKey {
-    const buf = Buffer.alloc(4);
-    buf.writeUInt32LE(venueId);
-    return anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("stake"), buf, staker.toBuffer()],
-      program.programId
-    )[0];
-  }
 
   function guestPda(guestId: number): anchor.web3.PublicKey {
     const buf = Buffer.alloc(4);
@@ -73,20 +54,32 @@ describe("solana-city", () => {
     )[0];
   }
 
+  function vaultPda(venueId: number): anchor.web3.PublicKey {
+    const buf = Buffer.alloc(4);
+    buf.writeUInt32LE(venueId);
+    return anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("vault"), buf],
+      program.programId
+    )[0];
+  }
+
+  function stakePda(venueId: number, staker: anchor.web3.PublicKey): anchor.web3.PublicKey {
+    const buf = Buffer.alloc(4);
+    buf.writeUInt32LE(venueId);
+    return anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("stake"), buf, staker.toBuffer()],
+      program.programId
+    )[0];
+  }
+
   // ── City ─────────────────────────────────────────────────────────────────
 
   describe("initialize_city", () => {
     it("rejects names longer than 32 bytes", async () => {
-      // Run error case first — failed tx leaves the PDA uncreated so the
-      // success case below can call init on the same PDA.
       try {
         await program.methods
           .initializeCity("A".repeat(33))
-          .accounts({
-            authority: payer.publicKey,
-            city: cityPda,
-            systemProgram: anchor.web3.SystemProgram.programId,
-          })
+          .accounts({ authority: payer.publicKey })
           .signers([payer])
           .rpc();
         assert.fail("expected NameTooLong error");
@@ -98,11 +91,7 @@ describe("solana-city", () => {
     it("creates city PDA with correct initial state", async () => {
       await program.methods
         .initializeCity("TestPark")
-        .accounts({
-          authority: payer.publicKey,
-          city: cityPda,
-          systemProgram: anchor.web3.SystemProgram.programId,
-        })
+        .accounts({ authority: payer.publicKey })
         .signers([payer])
         .rpc();
 
@@ -126,12 +115,7 @@ describe("solana-city", () => {
     it("creates venue PDA and increments city venue_count", async () => {
       await program.methods
         .registerVenue(1, 0, "Roller Coaster")
-        .accounts({
-          payer: payer.publicKey,
-          city: cityPda,
-          venue: venuePda(1),
-          systemProgram: anchor.web3.SystemProgram.programId,
-        })
+        .accounts({ payer: payer.publicKey })
         .signers([payer])
         .rpc();
 
@@ -154,12 +138,7 @@ describe("solana-city", () => {
       try {
         await program.methods
           .registerVenue(99, 1, "A".repeat(33))
-          .accounts({
-            payer: payer.publicKey,
-            city: cityPda,
-            venue: venuePda(99),
-            systemProgram: anchor.web3.SystemProgram.programId,
-          })
+          .accounts({ payer: payer.publicKey })
           .signers([payer])
           .rpc();
         assert.fail("expected NameTooLong error");
@@ -173,7 +152,7 @@ describe("solana-city", () => {
     it("updates the venue name bytes", async () => {
       await program.methods
         .renameVenue(1, "Big Dipper")
-        .accounts({ payer: payer.publicKey, venue: venuePda(1) })
+        .accounts({ payer: payer.publicKey })
         .signers([payer])
         .rpc();
 
@@ -188,7 +167,7 @@ describe("solana-city", () => {
       try {
         await program.methods
           .renameVenue(1, "A".repeat(33))
-          .accounts({ payer: payer.publicKey, venue: venuePda(1) })
+          .accounts({ payer: payer.publicKey })
           .signers([payer])
           .rpc();
         assert.fail("expected NameTooLong error");
@@ -200,11 +179,9 @@ describe("solana-city", () => {
 
   describe("repair_venue", () => {
     it("clears is_broken flag", async () => {
-      // Venue is already not broken; repair is idempotent — verify the call succeeds
-      // and the flag stays false.
       await program.methods
         .repairVenue(1)
-        .accounts({ payer: payer.publicKey, venue: venuePda(1) })
+        .accounts({ payer: payer.publicKey })
         .signers([payer])
         .rpc();
 
@@ -221,12 +198,7 @@ describe("solana-city", () => {
 
       await program.methods
         .registerGuest(42, INITIAL_BALANCE)
-        .accounts({
-          payer: payer.publicKey,
-          city: cityPda,
-          guest: guestPda(42),
-          systemProgram: anchor.web3.SystemProgram.programId,
-        })
+        .accounts({ payer: payer.publicKey })
         .signers([payer])
         .rpc();
 
@@ -251,11 +223,7 @@ describe("solana-city", () => {
 
       await program.methods
         .spend(42, 1, SPEND, 0)
-        .accounts({
-          payer: payer.publicKey,
-          guest: guestPda(42),
-          venue: venuePda(1),
-        })
+        .accounts({ payer: payer.publicKey })
         .signers([payer])
         .rpc();
 
@@ -271,11 +239,7 @@ describe("solana-city", () => {
       try {
         await program.methods
           .spend(42, 1, new BN(100_000_000), 0)
-          .accounts({
-            payer: payer.publicKey,
-            guest: guestPda(42),
-            venue: venuePda(1),
-          })
+          .accounts({ payer: payer.publicKey })
           .signers([payer])
           .rpc();
         assert.fail("expected InsufficientBalance error");
@@ -285,11 +249,6 @@ describe("solana-city", () => {
     });
 
     it("rejects spend at a broken venue", async () => {
-      // Register a second venue, set up a fresh guest, then use a second venue
-      // that we simulate as broken by registering it and using account manipulation.
-      // We register venue 2 here; to mark it broken we'd need VRF on the ER,
-      // so instead we verify the error code path via a direct account write.
-      // For localnet we confirm the constraint exists via program metadata only.
       // Actual broken-venue spend errors are exercised in ER integration tests.
     });
   });
@@ -300,7 +259,7 @@ describe("solana-city", () => {
     it("sets is_active to false (base-layer finalisation after remove_venue)", async () => {
       await program.methods
         .deactivateVenue(1)
-        .accounts({ payer: payer.publicKey, venue: venuePda(1) })
+        .accounts({ payer: payer.publicKey })
         .signers([payer])
         .rpc();
 
@@ -317,11 +276,7 @@ describe("solana-city", () => {
 
       await program.methods
         .claimPrize(42)
-        .accounts({
-          payer: payer.publicKey,
-          guest: guestPda(42),
-          city: cityPda,
-        })
+        .accounts({ payer: payer.publicKey })
         .signers([payer])
         .rpc();
 
@@ -339,10 +294,7 @@ describe("solana-city", () => {
 
   describe("update_park_score", () => {
     it("recalculates score: 500 + min(activeGuests,200) + min(revenue/1M,300)", async () => {
-      await program.methods
-        .updateParkScore()
-        .accounts({ city: cityPda })
-        .rpc();
+      await program.methods.updateParkScore().rpc();
 
       const city = await program.account.cityState.fetch(cityPda);
       // claim_prize decremented active_guests to 0 → 500 + 0 + 0 = 500
@@ -352,10 +304,7 @@ describe("solana-city", () => {
 
   describe("auto_park_tick", () => {
     it("applies the same score formula as update_park_score", async () => {
-      await program.methods
-        .autoParkTick()
-        .accounts({ city: cityPda })
-        .rpc();
+      await program.methods.autoParkTick().rpc();
 
       const city = await program.account.cityState.fetch(cityPda);
       assert.equal(city.parkScore, 500);
@@ -366,24 +315,16 @@ describe("solana-city", () => {
 
   describe("park score guest bonus cap", () => {
     it("caps guest bonus at 200 even with more than 200 active guests", async () => {
-      // Register 200 additional guests (IDs 1000–1199) to push active_guests over 200
+      // Register 10 additional guests (IDs 1000–1009) to push active_guests to 10
       for (let i = 1000; i < 1010; i++) {
         await program.methods
           .registerGuest(i, new BN(1_000_000))
-          .accounts({
-            payer: payer.publicKey,
-            city: cityPda,
-            guest: guestPda(i),
-            systemProgram: anchor.web3.SystemProgram.programId,
-          })
+          .accounts({ payer: payer.publicKey })
           .signers([payer])
           .rpc();
       }
 
-      await program.methods
-        .updateParkScore()
-        .accounts({ city: cityPda })
-        .rpc();
+      await program.methods.updateParkScore().rpc();
 
       const city = await program.account.cityState.fetch(cityPda);
       // guest 42 was exited (active_guests=0), then 10 new guests registered → 10 active
@@ -398,12 +339,7 @@ describe("solana-city", () => {
     it("creates the $PARK mint PDA with 6 decimals", async () => {
       await program.methods
         .initializeParkMint()
-        .accounts({
-          payer: payer.publicKey,
-          parkMint: parkMintPda,
-          tokenProgram: TOKEN_PROGRAM_ID,
-          systemProgram: anchor.web3.SystemProgram.programId,
-        })
+        .accounts({ payer: payer.publicKey })
         .signers([payer])
         .rpc();
 
@@ -415,22 +351,13 @@ describe("solana-city", () => {
   describe("redeem_balance", () => {
     it("mints $PARK tokens equal to guest balance and zeroes the balance", async () => {
       // guest 42 is inactive (exited via claim_prize) with balance = 4_000_000
-      const stakerAta = getAssociatedTokenAddressSync(parkMintPda, payer.publicKey);
-
       await program.methods
         .redeemBalance(42)
-        .accounts({
-          payer: payer.publicKey,
-          guest: guestPda(42),
-          parkMint: parkMintPda,
-          recipientAta: stakerAta,
-          tokenProgram: TOKEN_PROGRAM_ID,
-          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
-          systemProgram: anchor.web3.SystemProgram.programId,
-        })
+        .accounts({ payer: payer.publicKey })
         .signers([payer])
         .rpc();
 
+      const stakerAta = getAssociatedTokenAddressSync(parkMintPda, payer.publicKey);
       const ata = await provider.connection.getTokenAccountBalance(stakerAta);
       assert.equal(ata.value.amount, "4000000", "ATA should hold 4M $PARK");
 
@@ -440,19 +367,10 @@ describe("solana-city", () => {
 
     it("rejects redeem when guest is still active", async () => {
       // guest 1000 is still active
-      const stakerAta = getAssociatedTokenAddressSync(parkMintPda, payer.publicKey);
       try {
         await program.methods
           .redeemBalance(1000)
-          .accounts({
-            payer: payer.publicKey,
-            guest: guestPda(1000),
-            parkMint: parkMintPda,
-            recipientAta: stakerAta,
-            tokenProgram: TOKEN_PROGRAM_ID,
-            associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
-            systemProgram: anchor.web3.SystemProgram.programId,
-          })
+          .accounts({ payer: payer.publicKey })
           .signers([payer])
           .rpc();
         assert.fail("expected GuestStillActive error");
@@ -468,12 +386,7 @@ describe("solana-city", () => {
     it("creates vault for venue 1 seeded with current revenue", async () => {
       await program.methods
         .createStakeVault(1)
-        .accounts({
-          payer: payer.publicKey,
-          vault: vaultPda(1),
-          venue: venuePda(1),
-          systemProgram: anchor.web3.SystemProgram.programId,
-        })
+        .accounts({ payer: payer.publicKey })
         .signers([payer])
         .rpc();
 
@@ -490,13 +403,7 @@ describe("solana-city", () => {
     it("stakes SOL and increases vault total_staked", async () => {
       await program.methods
         .stake(1, STAKE_AMOUNT)
-        .accounts({
-          staker: payer.publicKey,
-          vault: vaultPda(1),
-          position: stakePda(1, payer.publicKey),
-          venue: venuePda(1),
-          systemProgram: anchor.web3.SystemProgram.programId,
-        })
+        .accounts({ staker: payer.publicKey })
         .signers([payer])
         .rpc();
 
@@ -511,11 +418,7 @@ describe("solana-city", () => {
       // guest 1000 is active with 1_000_000 balance; spend 500_000 at venue 1
       await program.methods
         .spend(1000, 1, SPEND_AMOUNT, 0)
-        .accounts({
-          payer: payer.publicKey,
-          guest: guestPda(1000),
-          venue: venuePda(1),
-        })
+        .accounts({ payer: payer.publicKey })
         .signers([payer])
         .rpc();
 
@@ -531,17 +434,7 @@ describe("solana-city", () => {
 
       await program.methods
         .claimStakeRewards(1)
-        .accounts({
-          staker: payer.publicKey,
-          vault: vaultPda(1),
-          position: stakePda(1, payer.publicKey),
-          venue: venuePda(1),
-          parkMint: parkMintPda,
-          stakerAta,
-          tokenProgram: TOKEN_PROGRAM_ID,
-          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
-          systemProgram: anchor.web3.SystemProgram.programId,
-        })
+        .accounts({ staker: payer.publicKey })
         .signers([payer])
         .rpc();
 
@@ -552,22 +445,11 @@ describe("solana-city", () => {
     });
 
     it("unstake returns SOL and position.amount is zeroed", async () => {
-      const stakerAta = getAssociatedTokenAddressSync(parkMintPda, payer.publicKey);
       const solBefore = await provider.connection.getBalance(payer.publicKey);
 
       await program.methods
         .unstake(1)
-        .accounts({
-          staker: payer.publicKey,
-          vault: vaultPda(1),
-          position: stakePda(1, payer.publicKey),
-          venue: venuePda(1),
-          parkMint: parkMintPda,
-          stakerAta,
-          tokenProgram: TOKEN_PROGRAM_ID,
-          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
-          systemProgram: anchor.web3.SystemProgram.programId,
-        })
+        .accounts({ staker: payer.publicKey })
         .signers([payer])
         .rpc();
 
@@ -589,11 +471,7 @@ describe("solana-city", () => {
     it("creates leaderboard PDA with all empty entries", async () => {
       await program.methods
         .initializeLeaderboard()
-        .accounts({
-          payer: payer.publicKey,
-          leaderboard: leaderboardPda,
-          systemProgram: anchor.web3.SystemProgram.programId,
-        })
+        .accounts({ payer: payer.publicKey })
         .signers([payer])
         .rpc();
 
@@ -610,11 +488,7 @@ describe("solana-city", () => {
     it("inserts the city into an empty leaderboard slot at index 0", async () => {
       await program.methods
         .submitScore()
-        .accounts({
-          payer: payer.publicKey,
-          leaderboard: leaderboardPda,
-          city: cityPda,
-        })
+        .accounts({ payer: payer.publicKey, city: cityPda })
         .signers([payer])
         .rpc();
 
@@ -633,14 +507,9 @@ describe("solana-city", () => {
     });
 
     it("updates the existing entry when the same city submits again", async () => {
-      // Submit again — no new guests, but should update the stored revenue
       await program.methods
         .submitScore()
-        .accounts({
-          payer: payer.publicKey,
-          leaderboard: leaderboardPda,
-          city: cityPda,
-        })
+        .accounts({ payer: payer.publicKey, city: cityPda })
         .signers([payer])
         .rpc();
 
