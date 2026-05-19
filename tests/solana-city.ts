@@ -22,6 +22,11 @@ describe("solana-city", () => {
     program.programId
   );
 
+  const [leaderboardPda] = anchor.web3.PublicKey.findProgramAddressSync(
+    [Buffer.from("leaderboard")],
+    program.programId
+  );
+
   function guestPda(guestId: number): anchor.web3.PublicKey {
     const buf = Buffer.alloc(4);
     buf.writeUInt32LE(guestId);
@@ -356,6 +361,81 @@ describe("solana-city", () => {
       // guest 42 was exited (active_guests=0), then 10 new guests registered → 10 active
       // bonus = min(10, 200) = 10 → score = 500 + 10 + 0 = 510
       assert.equal(city.parkScore, 510);
+    });
+  });
+
+  // ── Leaderboard ───────────────────────────────────────────────────────────
+
+  describe("initialize_leaderboard", () => {
+    it("creates leaderboard PDA with all empty entries", async () => {
+      await program.methods
+        .initializeLeaderboard()
+        .accounts({
+          payer: payer.publicKey,
+          leaderboard: leaderboardPda,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .signers([payer])
+        .rpc();
+
+      const lb = await program.account.leaderboard.fetch(leaderboardPda);
+      assert.equal(lb.entries.length, 10);
+      assert.isTrue(
+        lb.entries.every((e: any) => e.revenue.eqn(0)),
+        "all entries should start with zero revenue"
+      );
+    });
+  });
+
+  describe("submit_score", () => {
+    it("inserts the city into an empty leaderboard slot at index 0", async () => {
+      await program.methods
+        .submitScore()
+        .accounts({
+          payer: payer.publicKey,
+          leaderboard: leaderboardPda,
+          city: cityPda,
+        })
+        .signers([payer])
+        .rpc();
+
+      const lb = await program.account.leaderboard.fetch(leaderboardPda);
+      const city = await program.account.cityState.fetch(cityPda);
+
+      assert.equal(
+        lb.entries[0].park.toString(),
+        cityPda.toString(),
+        "city should be the top entry"
+      );
+      assert.isTrue(
+        lb.entries[0].revenue.eq(city.totalRevenue),
+        "leaderboard revenue should match city total_revenue"
+      );
+    });
+
+    it("updates the existing entry when the same city submits again", async () => {
+      // Submit again — no new guests, but should update the stored revenue
+      await program.methods
+        .submitScore()
+        .accounts({
+          payer: payer.publicKey,
+          leaderboard: leaderboardPda,
+          city: cityPda,
+        })
+        .signers([payer])
+        .rpc();
+
+      const lb = await program.account.leaderboard.fetch(leaderboardPda);
+      const city = await program.account.cityState.fetch(cityPda);
+
+      const cityEntry = lb.entries.find(
+        (e: any) => e.park.toString() === cityPda.toString()
+      );
+      assert.isDefined(cityEntry, "city should still be on the leaderboard");
+      assert.isTrue(
+        (cityEntry as any).revenue.eq(city.totalRevenue),
+        "revenue should reflect current city state"
+      );
     });
   });
 });

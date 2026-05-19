@@ -80,6 +80,15 @@ pub mod solana_city {
         venue::deactivate_venue(ctx, venue_id)
     }
 
+    // ── Leaderboard ───────────────────────────────────────────────────────
+    pub fn initialize_leaderboard(ctx: Context<InitializeLeaderboard>) -> Result<()> {
+        leaderboard::initialize_leaderboard(ctx)
+    }
+
+    pub fn submit_score(ctx: Context<SubmitScore>) -> Result<()> {
+        leaderboard::submit_score(ctx)
+    }
+
     // ── VRF random events (ER) ────────────────────────────────────────────
     pub fn request_park_event(ctx: Context<RequestParkEvent>, guest_id: u32, client_seed: u8) -> Result<()> {
         vrf::request_park_event(ctx, guest_id, client_seed)
