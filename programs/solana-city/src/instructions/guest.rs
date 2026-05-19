@@ -76,8 +76,12 @@ pub fn claim_prize(ctx: Context<ClaimPrize>, _guest_id: u32) -> Result<()> {
         msg!("Guest {} claimed prize: {} PARK", guest.guest_id, prize);
     }
 
-    // Finalize exit: mark guest inactive now that account is back on base layer.
-    guest.is_active = false;
+    // Finalize exit: mark guest inactive and update city headcount.
+    // Guard against double-calling claim_prize on the same guest.
+    if guest.is_active {
+        guest.is_active = false;
+        city.active_guests = city.active_guests.saturating_sub(1);
+    }
     Ok(())
 }
 

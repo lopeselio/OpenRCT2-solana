@@ -296,6 +296,9 @@ describe("solana-city", () => {
       assert.isTrue(guestAfter.balance.eq(guestBefore.balance));
       assert.isTrue(guestAfter.pendingPrize.eqn(0));
       assert.isFalse(guestAfter.isActive, "claim_prize should finalise guest exit");
+
+      const cityAfter = await program.account.cityState.fetch(cityPda);
+      assert.equal(cityAfter.activeGuests, 0, "active_guests should decrement on exit");
     });
   });
 
@@ -309,8 +312,8 @@ describe("solana-city", () => {
         .rpc();
 
       const city = await program.account.cityState.fetch(cityPda);
-      // 1 active guest, 0 total_revenue → 500 + 1 + 0 = 501
-      assert.equal(city.parkScore, 501);
+      // claim_prize decremented active_guests to 0 → 500 + 0 + 0 = 500
+      assert.equal(city.parkScore, 500);
     });
   });
 
@@ -322,7 +325,7 @@ describe("solana-city", () => {
         .rpc();
 
       const city = await program.account.cityState.fetch(cityPda);
-      assert.equal(city.parkScore, 501);
+      assert.equal(city.parkScore, 500);
     });
   });
 
@@ -350,8 +353,9 @@ describe("solana-city", () => {
         .rpc();
 
       const city = await program.account.cityState.fetch(cityPda);
-      // 11 total active guests: bonus = min(11, 200) = 11 → score = 511
-      assert.equal(city.parkScore, 511);
+      // guest 42 was exited (active_guests=0), then 10 new guests registered → 10 active
+      // bonus = min(10, 200) = 10 → score = 500 + 10 + 0 = 510
+      assert.equal(city.parkScore, 510);
     });
   });
 });
