@@ -9,7 +9,8 @@
     "dev": "ts-node src/main.ts",
     "watch": "ts-node-dev --respawn src/main.ts",
     "e2e": "ts-node src/e2e.ts",
-    "check-failures": "ts-node src/check-er-failures.ts"
+    "check-failures": "ts-node src/check-er-failures.ts",
+    "create-tycoon-metadata": "ts-node src/create-tycoon-metadata.ts"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1",

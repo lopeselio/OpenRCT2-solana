@@ -1,0 +1,21 @@
+{
+  "name": "Tycoon",
+  "symbol": "TYCOON",
+  "description": "The in-park currency of Solana City — a real-time, on-chain RollerCoaster Tycoon 2 economy running on MagicBlock Ephemeral Rollups. Every guest spend, ride visit, and venue interaction is a Solana transaction at ~10-50ms latency.",
+  "image": "https://bronze-disabled-tyrannosaurus-480.mypinata.cloud/ipfs/bafybeigcf3w4dzua7zp6vdlch7nx7ty7lcxwhmfyrgomazlgpu2dbbuy7m",
+  "external_url": "https://github.com/lopeselio/openrct-solana",
+  "attributes": [
+    { "trait_type": "Park", "value": "Solana City" },
+    { "trait_type": "Layer", "value": "Devnet + MagicBlock ER" },
+    { "trait_type": "Decimals", "value": "6" }
+  ],
+  "properties": {
+    "files": [
+      {
+        "uri": "https://bronze-disabled-tyrannosaurus-480.mypinata.cloud/ipfs/bafybeigcf3w4dzua7zp6vdlch7nx7ty7lcxwhmfyrgomazlgpu2dbbuy7m",
+        "type": "image/png"
+      }
+    ],
+    "category": "image"
+  }
+}

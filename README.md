@@ -13,12 +13,12 @@ and venue interaction a real blockchain transaction at ~10-50ms latency.
 
 When you play the park, every economic event becomes real:
 
-- Guests enter with a **$PARK token balance** stored on-chain
+- Guests enter with a **$TYCOON token balance** stored on-chain
 - Every ride, food purchase, and ATM withdrawal is a **Solana transaction**
 - Revenues accumulate in **venue accounts** visible on-chain
 - Random events (ride breakdowns, lucky prizes) use **cryptographically verifiable randomness**
 - A **self-scheduling crank** updates the park score every 30 seconds — with no server
-- Players earn **milestone badges** and submit scores to a global **leaderboard**, while LPs **stake $PARK** on individual venues
+- Players earn **milestone badges** and submit scores to a global **leaderboard**, while LPs **stake $TYCOON** on individual venues
 
 ---
 
@@ -53,8 +53,8 @@ Random event table (triggered ~once per guest per visit):
 |------------|-------|--------|
 | 0–19 | **Ride breakdown** | `venue.is_broken = true` — guests can't use it until repaired |
 | 20–49 | Quiet day | Nothing |
-| 50–79 | **Lucky guest wins prize** | 50–500 $PARK awarded to the guest |
-| 80–99 | **Park bonus** | +10 $PARK to the current guest |
+| 50–79 | **Lucky guest wins prize** | 50–500 $TYCOON awarded to the guest |
+| 80–99 | **Park bonus** | +10 $TYCOON to the current guest |
 
 The breakdown mechanic is meaningful: a ride that breaks earns no revenue until
 `repair_venue` is called (by the sidecar or park manager wallet).
@@ -93,7 +93,8 @@ byte-identical to the current `programs/solana-city/` source.
 
 | Account | Address | Seeds |
 |---|---|---|
-| `$PARK` token mint | `7vBp2RpMtfpjexC8z7sWV4nUFHNNskQQBxGrRkfSUYN1` | `["park_mint"]` |
+| `$TYCOON` token mint | `7vBp2RpMtfpjexC8z7sWV4nUFHNNskQQBxGrRkfSUYN1` | `["park_mint"]` |
+| `$TYCOON` Metaplex metadata | `BFuRata5t9aHjLhz4aFvsqnBH1mGKZcETGDacwRvXLda` | `["metadata", mpl_pid, mint_pubkey]` |
 | Leaderboard | `8AqUe5DTaoCBzUZt5ZQLTdH6khBTcyPE8Veo7qk2uTxA` | `["leaderboard"]` |
 | City (`park_id=1`) | `CUW5Ea9uSvfppPD5PmLykKzSrLYxysCNwDcLSFk86kq` | `["city", park_id_u32_le]` |
 
@@ -110,7 +111,7 @@ All seeds use the program ID `2ce1z7iFfMB6BHzaWvT5jqhsDsS6jeEjvymGYwrb8wDn`.
 | `VenueStakeVault` | `["vault", park_id_u32_le, venue_id_u32_le]` |
 | `StakePosition` | `["stake", park_id_u32_le, venue_id_u32_le, staker_pubkey]` |
 | `Badge` | `["badge", city_pubkey, tier_u8]` |
-| `$PARK` mint | `["park_mint"]` |
+| `$TYCOON` mint | `["park_mint"]` *(historical seed; display name is TYCOON via Metaplex)* |
 | `Leaderboard` | `["leaderboard"]` |
 
 ### Endpoints
@@ -140,7 +141,7 @@ All seeds use the program ID `2ce1z7iFfMB6BHzaWvT5jqhsDsS6jeEjvymGYwrb8wDn`.
                                             ┌──────────────────────────────┐
                                             │ Solana devnet (base layer)   │
                                             │  • city init, registrations  │
-                                            │  • $PARK mint + redeem       │
+                                            │  • $TYCOON mint + redeem     │
                                             │  • stake / claim_prize       │
                                             │  • leaderboard, badges       │
                                             └─────────┬────────────────────┘
@@ -172,14 +173,14 @@ openrct-solana/
 │   ├── Cargo.toml              — anchor 0.32.1, ephemeral-rollups-sdk 0.11.1,
 │   │                             ephemeral-vrf-sdk 0.2.3, magicblock-magic-program-api 0.8.5
 │   └── src/
-│       ├── lib.rs              — #[ephemeral] program entry, 28 instructions
+│       ├── lib.rs              — #[ephemeral] program entry, 29 instructions
 │       ├── state.rs            — account types
 │       ├── errors.rs           — CityError enum
 │       └── instructions/
 │           ├── city.rs         — initialize_city, update_park_score
 │           ├── guest.rs        — register / delegate / claim_prize / commit / exit
 │           ├── venue.rs        — register / delegate / rename / repair / remove / deactivate
-│           ├── token.rs        — initialize_park_mint, redeem_balance
+│           ├── token.rs        — initialize_park_mint, redeem_balance, create_park_metadata
 │           ├── staking.rs      — create_stake_vault, stake, unstake, claim_stake_rewards
 │           ├── leaderboard.rs  — initialize_leaderboard, submit_score
 │           ├── badges.rs       — claim_badge (milestone tiers)
@@ -188,7 +189,7 @@ openrct-solana/
 │
 ├── chain-sidecar/              — TypeScript event router
 │   └── src/
-│       ├── main.ts             — dispatcher + city/$PARK bootstrap
+│       ├── main.ts             — dispatcher + city/$TYCOON bootstrap
 │       ├── e2e.ts              — devnet end-to-end smoke
 │       ├── outbox/             — NDJSON tail reader + event types
 │       ├── solana/
@@ -202,14 +203,14 @@ openrct-solana/
 └── Anchor.toml, Cargo.toml     — workspace config
 ```
 
-### Program instructions (28)
+### Program instructions (29)
 
 | Module | Instructions |
 |---|---|
 | `city` | `initialize_city`, `update_park_score` |
 | `guest` | `register_guest`, `delegate_guest`, `spend`, `claim_prize`, `commit_guest`, `exit_guest` |
 | `venue` | `register_venue`, `delegate_venue`, `rename_venue`, `repair_venue`, `remove_venue`, `deactivate_venue` |
-| `token` | `initialize_park_mint`, `redeem_balance` |
+| `token` | `initialize_park_mint`, `redeem_balance`, `create_park_metadata` |
 | `staking` | `create_stake_vault`, `stake`, `unstake`, `claim_stake_rewards` |
 | `leaderboard` | `initialize_leaderboard`, `submit_score` |
 | `badges` | `claim_badge` |
