@@ -135,15 +135,20 @@ export async function onGuestEntry(
       return;
 
     case "base": {
-      // Guest PDA already exists on base from a prior session — skip register,
-      // just re-delegate. Balance carries over from the previous visit.
-      console.log(`[chain] Guest ${guestId} exists on base — re-delegating to ER...`);
+      // Guest PDA already exists on base from a prior session.
+      // Reactivate (bump active_guests, flip is_active=true) then re-delegate.
+      // Balance and total_spent carry over from the previous visit.
+      console.log(`[chain] Guest ${guestId} exists on base — reactivating + re-delegating...`);
+      await baseProgram.methods
+        .reactivateGuest(PARK_ID, guestId)
+        .accounts({ payer: baseProvider.wallet.publicKey })
+        .rpc({ skipPreflight: false, commitment: "confirmed" });
       await baseProgram.methods
         .delegateGuest(PARK_ID, guestId)
         .accounts({ payer: baseProvider.wallet.publicKey })
         .rpc({ skipPreflight: false, commitment: "confirmed" });
       await sleep(3000);
-      console.log(`[chain] Guest ${guestId} re-delegated to ER`);
+      console.log(`[chain] Guest ${guestId} reactivated + delegated to ER`);
       return;
     }
 

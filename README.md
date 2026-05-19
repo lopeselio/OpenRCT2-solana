@@ -173,7 +173,7 @@ openrct-solana/
 │   ├── Cargo.toml              — anchor 0.32.1, ephemeral-rollups-sdk 0.11.1,
 │   │                             ephemeral-vrf-sdk 0.2.3, magicblock-magic-program-api 0.8.5
 │   └── src/
-│       ├── lib.rs              — #[ephemeral] program entry, 29 instructions
+│       ├── lib.rs              — #[ephemeral] program entry, 30 instructions
 │       ├── state.rs            — account types
 │       ├── errors.rs           — CityError enum
 │       └── instructions/
@@ -203,12 +203,12 @@ openrct-solana/
 └── Anchor.toml, Cargo.toml     — workspace config
 ```
 
-### Program instructions (29)
+### Program instructions (30)
 
 | Module | Instructions |
 |---|---|
 | `city` | `initialize_city`, `update_park_score` |
-| `guest` | `register_guest`, `delegate_guest`, `spend`, `claim_prize`, `commit_guest`, `exit_guest` |
+| `guest` | `register_guest`, `reactivate_guest`, `delegate_guest`, `spend`, `claim_prize`, `commit_guest`, `exit_guest` |
 | `venue` | `register_venue`, `delegate_venue`, `rename_venue`, `repair_venue`, `remove_venue`, `deactivate_venue` |
 | `token` | `initialize_park_mint`, `redeem_balance`, `create_park_metadata` |
 | `staking` | `create_stake_vault`, `stake`, `unstake`, `claim_stake_rewards` |
