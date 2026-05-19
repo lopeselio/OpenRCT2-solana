@@ -10,6 +10,7 @@
 #include "RideCreateAction.h"
 
 #include "../Cheats.h"
+#include "../scripting/ChainOutbox.h"
 #include "../Context.h"
 #include "../Diagnostic.h"
 #include "../GameState.h"
@@ -142,6 +143,11 @@ namespace OpenRCT2::GameActions
         ride->setColourPreset(_colour1);
         ride->overallView.SetNull();
         ride->setNameToDefault();
+        OpenRCT2::Scripting::ChainOutbox::Get().EmitVenueRegistered(
+            static_cast<int32_t>(rideIndex.ToUnderlying()),
+            static_cast<int32_t>(GetRideTypeDescriptor(_rideType).Category),
+            ride->getName(),
+            "ride");
 
         // Default initialize all stations.
         RideStation station{};

@@ -10,6 +10,7 @@
 #include "RideDemolishAction.h"
 
 #include "../Cheats.h"
+#include "../scripting/ChainOutbox.h"
 #include "../Context.h"
 #include "../Diagnostic.h"
 #include "../GameState.h"
@@ -123,6 +124,9 @@ namespace OpenRCT2::GameActions
 
     Result RideDemolishAction::DemolishRide(GameState_t& gameState, Ride& ride) const
     {
+        OpenRCT2::Scripting::ChainOutbox::Get().EmitVenueRemoved(
+            static_cast<int32_t>(ride.id.ToUnderlying()));
+
         money64 refundPrice = DemolishTracks(gameState);
 
         RideClearForConstruction(ride);
