@@ -1,0 +1,5 @@
+{
+    "cmake.sourceDirectory": "${workspaceFolder}/game",
+    "cmake.buildDirectory": "${workspaceFolder}/game/build",
+    "C_Cpp.default.compileCommands": "${workspaceFolder}/game/build/compile_commands.json"
+}
