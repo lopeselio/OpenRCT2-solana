@@ -1,5 +1,6 @@
 [toolchain]
 package_manager = "yarn"
+sbf_tools_version = "v1.52"
 
 [features]
 resolution = true
