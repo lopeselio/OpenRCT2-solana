@@ -76,6 +76,14 @@ pub fn remove_venue(ctx: Context<RemoveVenue>) -> Result<()> {
     Ok(())
 }
 
+// Finalise venue removal on base layer — call after remove_venue returns the account.
+// Sets is_active = false; remove_venue cannot do this (ExternalAccountDataModified).
+pub fn deactivate_venue(ctx: Context<DeactivateVenue>, _venue_id: u32) -> Result<()> {
+    ctx.accounts.venue.is_active = false;
+    msg!("Venue {} deactivated", ctx.accounts.venue.venue_id);
+    Ok(())
+}
+
 // ─── Contexts ──────────────────────────────────────────────────────────────
 
 #[derive(Accounts)]
@@ -119,6 +127,15 @@ pub struct RenameVenue<'info> {
 #[derive(Accounts)]
 #[instruction(venue_id: u32)]
 pub struct RepairVenue<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    #[account(mut, seeds = [b"venue", venue_id.to_le_bytes().as_ref()], bump = venue.bump)]
+    pub venue: Account<'info, VenueAccount>,
+}
+
+#[derive(Accounts)]
+#[instruction(venue_id: u32)]
+pub struct DeactivateVenue<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
     #[account(mut, seeds = [b"venue", venue_id.to_le_bytes().as_ref()], bump = venue.bump)]

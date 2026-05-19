@@ -261,6 +261,21 @@ describe("solana-city", () => {
     });
   });
 
+  // ── Deactivate Venue ─────────────────────────────────────────────────────
+
+  describe("deactivate_venue", () => {
+    it("sets is_active to false (base-layer finalisation after remove_venue)", async () => {
+      await program.methods
+        .deactivateVenue(1)
+        .accounts({ payer: payer.publicKey, venue: venuePda(1) })
+        .signers([payer])
+        .rpc();
+
+      const venue = await program.account.venueAccount.fetch(venuePda(1));
+      assert.isFalse(venue.isActive);
+    });
+  });
+
   // ── Claim Prize ───────────────────────────────────────────────────────────
 
   describe("claim_prize", () => {
@@ -280,6 +295,7 @@ describe("solana-city", () => {
       const guestAfter = await program.account.guestAccount.fetch(guestPda(42));
       assert.isTrue(guestAfter.balance.eq(guestBefore.balance));
       assert.isTrue(guestAfter.pendingPrize.eqn(0));
+      assert.isFalse(guestAfter.isActive, "claim_prize should finalise guest exit");
     });
   });
 

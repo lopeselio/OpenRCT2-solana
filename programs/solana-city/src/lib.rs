@@ -75,6 +75,11 @@ pub mod solana_city {
         venue::remove_venue(ctx)
     }
 
+    // Base layer: finalise venue removal after account returns from ER
+    pub fn deactivate_venue(ctx: Context<DeactivateVenue>, venue_id: u32) -> Result<()> {
+        venue::deactivate_venue(ctx, venue_id)
+    }
+
     // ── VRF random events (ER) ────────────────────────────────────────────
     pub fn request_park_event(ctx: Context<RequestParkEvent>, guest_id: u32, client_seed: u8) -> Result<()> {
         vrf::request_park_event(ctx, guest_id, client_seed)
