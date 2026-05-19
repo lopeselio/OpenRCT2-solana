@@ -89,6 +89,11 @@ pub mod solana_city {
         token::redeem_balance(ctx, guest_id)
     }
 
+    // One-shot: attach Metaplex Token Metadata to the park mint
+    pub fn create_park_metadata(ctx: Context<CreateParkMetadata>, name: String, symbol: String, uri: String) -> Result<()> {
+        token::create_park_metadata(ctx, name, symbol, uri)
+    }
+
     // ── Ride Revenue Staking ──────────────────────────────────────────────
     pub fn create_stake_vault(ctx: Context<CreateStakeVault>, park_id: u32, venue_id: u32) -> Result<()> {
         staking::create_stake_vault(ctx, park_id, venue_id)
