@@ -24,6 +24,7 @@ import { cityPda, parkMintPda, PARK_ID } from "./solana/accounts";
 import { ensureLeaderboardInitialized, tickScoreLoop } from "./solana/score";
 import { tickLottery } from "./solana/lottery";
 import { hydrateFromChain } from "./solana/runtime-state";
+import { writeSnapshot } from "./solana/snapshot";
 
 const SCORE_TICK_MS = parseInt(process.env.SCORE_TICK_MS ?? "30000", 10);
 const LOTTERY_TICK_MS = parseInt(process.env.LOTTERY_TICK_MS ?? "60000", 10);
@@ -100,6 +101,14 @@ async function main() {
   // so city.park_score reflects real spending.
   setInterval(() => void tickScoreLoop(baseProgram, erProgram), SCORE_TICK_MS);
   console.log(`[chain] Score loop running every ${SCORE_TICK_MS}ms`);
+
+  // Periodically write a chain-state.json snapshot the game's wallet panels
+  // tail. Same cadence as the score tick.
+  setInterval(() => void writeSnapshot(baseProgram), SCORE_TICK_MS);
+  // Also write once immediately so the file exists by the time the user
+  // opens a guest/venue window.
+  void writeSnapshot(baseProgram);
+  console.log("[chain] Snapshot writer attached");
 
   // Park lottery: every LOTTERY_TICK_MS pick a random active guest + venue,
   // fire a VRF request on the ER. consume_park_event stakes the result on the
