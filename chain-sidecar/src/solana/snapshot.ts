@@ -15,6 +15,7 @@ import {
   venuePda,
   PARK_ID,
 } from "./accounts";
+import { getClaimedBadges } from "./badges";
 
 const SNAPSHOT_PATH =
   process.env.SNAPSHOT_PATH ??
@@ -111,6 +112,8 @@ export async function writeSnapshot(
           }))
       : [];
 
+    const claimedBadges = await getClaimedBadges(baseProgram);
+
     const snapshot = {
       updated_at: new Date().toISOString(),
       operator: signer.publicKey.toBase58(),
@@ -124,6 +127,7 @@ export async function writeSnapshot(
             total_revenue: cityAcc.totalRevenue?.toString?.() ?? "0",
             total_guests_ever: cityAcc.totalGuestsEver?.toString?.() ?? "0",
             venue_count: cityAcc.venueCount,
+            badges: claimedBadges,
           }
         : null,
       leaderboard,

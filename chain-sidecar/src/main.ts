@@ -25,6 +25,7 @@ import { ensureLeaderboardInitialized, tickScoreLoop } from "./solana/score";
 import { tickLottery } from "./solana/lottery";
 import { hydrateFromChain } from "./solana/runtime-state";
 import { writeSnapshot } from "./solana/snapshot";
+import { tickBadgeClaims } from "./solana/badges";
 
 const SCORE_TICK_MS = parseInt(process.env.SCORE_TICK_MS ?? "30000", 10);
 const LOTTERY_TICK_MS = parseInt(process.env.LOTTERY_TICK_MS ?? "60000", 10);
@@ -101,6 +102,10 @@ async function main() {
   // so city.park_score reflects real spending.
   setInterval(() => void tickScoreLoop(baseProgram, erProgram), SCORE_TICK_MS);
   console.log(`[chain] Score loop running every ${SCORE_TICK_MS}ms`);
+
+  // Auto-claim milestone badges (Bronze/Silver/Gold/Diamond) as soon as
+  // city.total_guests_ever crosses each threshold. Idempotent.
+  setInterval(() => void tickBadgeClaims(baseProgram), SCORE_TICK_MS);
 
   // Periodically write a chain-state.json snapshot the game's wallet panels
   // tail. Same cadence as the score tick. Venues + guests are read from the

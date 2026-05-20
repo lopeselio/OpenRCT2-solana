@@ -45,4 +45,16 @@ export function leaderboardPda(): [PublicKey, number] {
   return PublicKey.findProgramAddressSync([Buffer.from("leaderboard")], PROGRAM_ID);
 }
 
+export function badgePda(cityPubkey: PublicKey, tier: number): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("badge"), cityPubkey.toBuffer(), Buffer.from([tier])],
+    PROGRAM_ID
+  );
+}
+
+// Tier thresholds mirror programs/solana-city/src/instructions/badges.rs.
+// Index = tier; value = min total_guests_ever required to claim.
+export const BADGE_TIER_THRESHOLDS: number[] = [5, 25, 100, 500];
+export const BADGE_TIER_NAMES: string[] = ["Bronze", "Silver", "Gold", "Diamond"];
+
 export { PROGRAM_ID };
