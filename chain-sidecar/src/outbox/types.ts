@@ -21,7 +21,7 @@ interface BaseEvent {
 export interface GuestEntryEvent extends BaseEvent {
   kind: "GUEST_ENTRY";
   guestId: number;
-  cash: string;   // decimal PARK units
+  cash: string;   // decimal TYCOON units
 }
 
 export interface GuestSpendEvent extends BaseEvent {

@@ -2,7 +2,7 @@
 //
 // Exercises the full guest + venue lifecycle against the live deployed program:
 //   venue registered → delegated → guest enters → spends → exits (ER→base)
-//   → prize claimed → PARK redeemed → venue removed → score submitted
+//   → prize claimed → TYCOON redeemed → venue removed → score submitted
 //
 // Run: ts-node src/e2e.ts
 // Requires: WALLET_PATH (or default ~/.config/solana/id.json), devnet SOL balance
@@ -121,8 +121,8 @@ async function main(): Promise<void> {
   assert("CityState.park_id matches", cityAcc.parkId === PARK_ID,
     `got ${cityAcc.parkId}`);
 
-  // ── Step 3: $PARK mint ───────────────────────────────────────────────────
-  step("3  $PARK mint");
+  // ── Step 3: $TYCOON mint ───────────────────────────────────────────────────
+  step("3  $TYCOON mint");
   const [mint] = parkMintPda();
   const mintInfo = await baseConnection.getAccountInfo(mint);
   if (mintInfo === null) {
@@ -131,12 +131,12 @@ async function main(): Promise<void> {
       .initializeParkMint()
       .accounts({ payer: signer.publicKey })
       .rpc({ commitment: "confirmed" });
-    console.log("     $PARK mint initialized:", mint.toBase58());
+    console.log("     $TYCOON mint initialized:", mint.toBase58());
   } else {
-    console.log("     $PARK mint exists:", mint.toBase58());
+    console.log("     $TYCOON mint exists:", mint.toBase58());
   }
   const mintExists = (await baseConnection.getAccountInfo(mint)) !== null;
-  assert("$PARK mint account exists on-chain", mintExists);
+  assert("$TYCOON mint account exists on-chain", mintExists);
 
   // ── Step 4: venue registered + delegated ─────────────────────────────────
   step("4  Venue registered + delegated to ER");
@@ -151,7 +151,7 @@ async function main(): Promise<void> {
 
   // ── Step 5: guest entered + delegated ────────────────────────────────────
   step("5  Guest registered + delegated to ER");
-  console.log(`     Registering guest ${GUEST_ID} with 5 PARK...`);
+  console.log(`     Registering guest ${GUEST_ID} with 5 TYCOON...`);
   await onGuestEntry(GUEST_ID, "5.0");
 
   const [guest] = guestPda(GUEST_ID);
@@ -165,7 +165,7 @@ async function main(): Promise<void> {
     `expected ${guestsBefore + 1}, got ${cityAfterEntry.totalGuestsEver.toNumber()}`);
 
   // ── Step 6: guest spends on ER ───────────────────────────────────────────
-  step("6  Guest spends 1.0 PARK at venue (Ephemeral Rollup)");
+  step("6  Guest spends 1.0 TYCOON at venue (Ephemeral Rollup)");
   console.log("     Sending spend transaction to ER...");
   await onGuestSpend(GUEST_ID, VENUE_ID, "1.0", 0);
   console.log("     Spend sent. ER state is not yet committed to base layer.");
@@ -191,17 +191,17 @@ async function main(): Promise<void> {
     guestFinal.balance.eqn(0),
     `balance = ${guestFinal.balance.toString()}`);
 
-  // Check $PARK ATA received tokens
+  // Check $TYCOON ATA received tokens
   const ata = getAssociatedTokenAddressSync(mint, signer.publicKey);
   try {
     const ataBalance = await baseConnection.getTokenAccountBalance(ata);
     const tokens = BigInt(ataBalance.value.amount);
-    assert("$PARK ATA received minted tokens (balance > 0)",
+    assert("$TYCOON ATA received minted tokens (balance > 0)",
       tokens > 0n,
       `ATA balance = ${tokens.toString()}`);
-    console.log(`     $PARK ATA balance: ${ataBalance.value.uiAmountString} PARK`);
+    console.log(`     $TYCOON ATA balance: ${ataBalance.value.uiAmountString} TYCOON`);
   } catch {
-    assert("$PARK ATA exists and received tokens", false, "ATA not found or empty");
+    assert("$TYCOON ATA exists and received tokens", false, "ATA not found or empty");
   }
 
   const cityAfterExit = await (baseProgram.account as any).cityState.fetch(city);

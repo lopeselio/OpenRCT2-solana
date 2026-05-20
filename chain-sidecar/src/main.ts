@@ -48,15 +48,15 @@ async function ensureParkMintInitialized(baseProgram: Program): Promise<void> {
   const [mint] = parkMintPda();
   const info = await baseProvider.connection.getAccountInfo(mint);
   if (info !== null) {
-    console.log("[chain] $PARK mint already initialized");
+    console.log("[chain] $TYCOON mint already initialized");
     return;
   }
-  console.log("[chain] Initializing $PARK mint...");
+  console.log("[chain] Initializing $TYCOON mint...");
   await baseProgram.methods
     .initializeParkMint()
     .accounts({ payer: signer.publicKey })
     .rpc({ commitment: "confirmed" });
-  console.log("[chain] $PARK mint initialized:", mint.toBase58());
+  console.log("[chain] $TYCOON mint initialized:", mint.toBase58());
 }
 
 async function main() {

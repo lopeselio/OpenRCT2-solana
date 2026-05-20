@@ -1,6 +1,6 @@
 // One-shot: invoke create_park_metadata on the deployed program to attach
 // Metaplex Token Metadata (name=Tycoon, symbol=TYCOON, uri=<pinned JSON>)
-// to the existing $PARK mint at 7vBp2RpMtfpjexC8z7sWV4nUFHNNskQQBxGrRkfSUYN1.
+// to the existing $TYCOON mint at 7vBp2RpMtfpjexC8z7sWV4nUFHNNskQQBxGrRkfSUYN1.
 //
 // Usage:
 //   cd chain-sidecar
