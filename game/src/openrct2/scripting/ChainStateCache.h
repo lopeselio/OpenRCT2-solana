@@ -31,6 +31,19 @@ namespace OpenRCT2::Scripting
         bool isActive;
     };
 
+    struct CitySummary
+    {
+        std::string address;
+        std::string name;
+        uint32_t parkScore;
+        uint32_t activeGuests;
+        uint64_t totalRevenue;
+        // Position of this park on the global leaderboard (1-based, 0 = off-board).
+        int32_t rank;
+        // Number of populated leaderboard slots.
+        uint32_t populated;
+    };
+
     class ChainStateCache
     {
     public:
@@ -40,6 +53,7 @@ namespace OpenRCT2::Scripting
         // Each call may trigger an mtime check and reparse.
         std::optional<GuestWallet> GetGuest(uint32_t guestId);
         std::optional<VenueWallet> GetVenue(uint32_t venueId);
+        std::optional<CitySummary> GetCity();
 
         // Operator's hot-wallet pubkey (base58). Always present once loaded.
         std::string GetOperator();
@@ -49,6 +63,7 @@ namespace OpenRCT2::Scripting
         void ReloadIfChanged();
 
         std::string _operator;
+        std::optional<CitySummary> _city;
         // Mapped by id; keep std::vector for cache-friendly iteration during reload.
         std::vector<std::optional<GuestWallet>> _guests;
         std::vector<std::optional<VenueWallet>> _venues;

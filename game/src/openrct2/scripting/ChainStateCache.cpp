@@ -72,6 +72,37 @@ namespace OpenRCT2::Scripting
             auto root = Json::ReadFromFile(path);
             _operator = Json::GetString(root["operator"]);
 
+            // Parse the city summary block.
+            _city.reset();
+            if (root["city"].is_object())
+            {
+                CitySummary c;
+                auto& cj = root["city"];
+                c.address = Json::GetString(cj["address"]);
+                c.name = Json::GetString(cj["name"]);
+                c.parkScore = Json::GetNumber<uint32_t>(cj["park_score"]);
+                c.activeGuests = Json::GetNumber<uint32_t>(cj["active_guests"]);
+                c.totalRevenue = ParseU64String(cj["total_revenue"]);
+                c.rank = 0;
+                c.populated = 0;
+
+                // Compute our rank from the leaderboard array (sorted desc by revenue).
+                if (root["leaderboard"].is_array())
+                {
+                    int32_t idx = 0;
+                    for (auto& entry : root["leaderboard"])
+                    {
+                        idx++;
+                        const auto entryAddr = Json::GetString(entry["park"]);
+                        if (!entryAddr.empty())
+                            c.populated++;
+                        if (entryAddr == c.address)
+                            c.rank = idx;
+                    }
+                }
+                _city = c;
+            }
+
             _guests.clear();
             if (root["guests"].is_array())
             {
@@ -137,5 +168,11 @@ namespace OpenRCT2::Scripting
     {
         ReloadIfChanged();
         return _operator;
+    }
+
+    std::optional<CitySummary> ChainStateCache::GetCity()
+    {
+        ReloadIfChanged();
+        return _city;
     }
 } // namespace OpenRCT2::Scripting

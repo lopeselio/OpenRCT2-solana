@@ -18,6 +18,7 @@
 #include <openrct2/OpenRCT2.h>
 #include <openrct2/SpriteIds.h>
 #include <openrct2/config/Config.h>
+#include <openrct2/scripting/ChainStateCache.h>
 #include <openrct2/drawing/Rectangle.h>
 #include <openrct2/entity/EntityRegistry.h>
 #include <openrct2/entity/Guest.h>
@@ -656,6 +657,59 @@ namespace OpenRCT2::Ui::Windows
             {
                 DrawMiddlePanel(rt);
             }
+
+            DrawTycoonHud(rt, middleWidget);
+        }
+
+        // ── TYCOON on-chain HUD ─────────────────────────────────────────────
+        // Always-visible single-line summary of the park's live on-chain state.
+        // Drawn near the top of the bottom-toolbar's middle panel so it never
+        // collides with the news/middle content (which sits lower in that
+        // widget). Pulls from ChainStateCache, which auto-reloads on file
+        // mtime change when chain-sidecar writes a new snapshot.
+        void DrawTycoonHud(RenderTarget& rt, const Widget& middleWidget)
+        {
+            auto& cache = OpenRCT2::Scripting::ChainStateCache::Get();
+            auto cityOpt = cache.GetCity();
+            const auto opAddr = cache.GetOperator();
+
+            // Truncate operator wallet (base58) for compact display.
+            std::string opShort;
+            if (opAddr.size() > 12)
+                opShort = opAddr.substr(0, 6) + "..." + opAddr.substr(opAddr.size() - 4);
+            else
+                opShort = opAddr;
+
+            char buf[256];
+            if (cityOpt.has_value())
+            {
+                const auto& c = *cityOpt;
+                const uint32_t gid = SPR_G2_TYCOON_GLYPH;
+                // Use {INLINE_SPRITE} so the coin renders inline with the line.
+                snprintf(
+                    buf, sizeof(buf),
+                    "{WHITE}{OUTLINE}%s   {INLINE_SPRITE}{%u}{%u}{%u}{%u} %llu.%02llu   Score %u   Rank #%d / %u",
+                    opShort.c_str(),
+                    (gid >> 0) & 0xFFu, (gid >> 8) & 0xFFu,
+                    (gid >> 16) & 0xFFu, (gid >> 24) & 0xFFu,
+                    static_cast<unsigned long long>(c.totalRevenue / 1000000ull),
+                    static_cast<unsigned long long>((c.totalRevenue % 1000000ull) / 10000ull),
+                    static_cast<unsigned>(c.parkScore), c.rank, static_cast<unsigned>(c.populated));
+            }
+            else
+            {
+                snprintf(buf, sizeof(buf), "{WHITE}{OUTLINE}TYCOON sidecar offline");
+            }
+
+            auto ft = Formatter();
+            ft.Add<const char*>(buf);
+            // Place text near the top-center of the bottom-toolbar middle panel.
+            int32_t cx = windowPos.x + middleWidget.midX();
+            int32_t cy = windowPos.y + middleWidget.top + 2;
+            TextPaint paint;
+            paint.FontStyle = FontStyle::small;
+            paint.Alignment = TextAlignment::centre;
+            DrawTextBasic(rt, { cx, cy }, STR_STRING, ft, paint);
         }
 
         void onUpdate() override
