@@ -103,11 +103,12 @@ async function main() {
   console.log(`[chain] Score loop running every ${SCORE_TICK_MS}ms`);
 
   // Periodically write a chain-state.json snapshot the game's wallet panels
-  // tail. Same cadence as the score tick.
-  setInterval(() => void writeSnapshot(baseProgram), SCORE_TICK_MS);
+  // tail. Same cadence as the score tick. Venues + guests are read from the
+  // ER (where spend() actually writes); city + leaderboard from base.
+  setInterval(() => void writeSnapshot(baseProgram, erProgram), SCORE_TICK_MS);
   // Also write once immediately so the file exists by the time the user
   // opens a guest/venue window.
-  void writeSnapshot(baseProgram);
+  void writeSnapshot(baseProgram, erProgram);
   console.log("[chain] Snapshot writer attached");
 
   // Park lottery: every LOTTERY_TICK_MS pick a random active guest + venue,

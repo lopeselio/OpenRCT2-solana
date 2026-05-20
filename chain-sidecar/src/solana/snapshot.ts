@@ -42,20 +42,33 @@ async function fetchBatch(
   return out;
 }
 
-export async function writeSnapshot(baseProgram: Program): Promise<void> {
+export async function writeSnapshot(
+  baseProgram: Program,
+  erProgram: Program
+): Promise<void> {
   try {
     const [city] = cityPda();
     const [lb] = leaderboardPda();
 
+    // city + leaderboard live on the base layer.
     const cityAcc: any = await (baseProgram.account as any).cityState.fetchNullable(city);
     const lbAcc: any = await (baseProgram.account as any).leaderboard.fetchNullable(lb);
 
+    // Guests and venues live on the ER while delegated — that's where spend()
+    // updates revenue and balance. Reading from base would always return the
+    // last-committed (often stale-zero) state.
     const guestKeys = Array.from({ length: MAX_GUEST_ID }, (_, i) => guestPda(i)[0]);
     const venueKeys = Array.from({ length: MAX_VENUE_ID }, (_, i) => venuePda(i)[0]);
-    const [guestAccs, venueAccs] = await Promise.all([
+    const [guestAccsEr, venueAccsEr, guestAccsBase, venueAccsBase] = await Promise.all([
+      fetchBatch(erProgram, "guestAccount", guestKeys),
+      fetchBatch(erProgram, "venueAccount", venueKeys),
       fetchBatch(baseProgram, "guestAccount", guestKeys),
       fetchBatch(baseProgram, "venueAccount", venueKeys),
     ]);
+    // Prefer ER (live state). Fall back to base for entities not currently
+    // delegated (e.g. just-created or already-exited).
+    const guestAccs = guestAccsEr.map((g, i) => g ?? guestAccsBase[i]);
+    const venueAccs = venueAccsEr.map((v, i) => v ?? venueAccsBase[i]);
 
     const guests = guestAccs.flatMap((g, i) =>
       g
