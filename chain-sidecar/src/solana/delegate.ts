@@ -136,11 +136,12 @@ export async function onGuestEntry(
 
     case "base": {
       // Guest PDA already exists on base from a prior session.
-      // Reactivate (bump active_guests, flip is_active=true) then re-delegate.
-      // Balance and total_spent carry over from the previous visit.
+      // Reactivate (resets balance to fresh pocket cash, bumps active_guests if
+      // newly active, idempotent if already active) then re-delegate.
+      // total_spent carries over from previous visits.
       console.log(`[chain] Guest ${guestId} exists on base — reactivating + re-delegating...`);
       await baseProgram.methods
-        .reactivateGuest(PARK_ID, guestId)
+        .reactivateGuest(PARK_ID, guestId, new BN(initialBalance.toString()))
         .accounts({ payer: baseProvider.wallet.publicKey })
         .rpc({ skipPreflight: false, commitment: "confirmed" });
       await baseProgram.methods
@@ -153,7 +154,7 @@ export async function onGuestEntry(
     }
 
     case "missing": {
-      console.log(`[chain] Registering guest ${guestId} in park ${PARK_ID} (${cash} PARK)...`);
+      console.log(`[chain] Registering guest ${guestId} in park ${PARK_ID} (${cash} TYCOON)...`);
       await baseProgram.methods
         .registerGuest(PARK_ID, guestId, new BN(initialBalance.toString()))
         .accounts({ payer: baseProvider.wallet.publicKey })
@@ -184,10 +185,67 @@ export async function onGuestSpend(
   const [guest] = guestPda(guestId);
   const [venue] = venuePda(venueId);
 
-  await erProgram.methods
-    .spend(PARK_ID, guestId, venueId, new BN(amountUnits.toString()), category)
-    .accounts({ payer: erProvider.wallet.publicKey, guest, venue })
-    .rpc({ skipPreflight: true });
+  try {
+    await erProgram.methods
+      .spend(PARK_ID, guestId, venueId, new BN(amountUnits.toString()), category)
+      .accounts({ payer: erProvider.wallet.publicKey, guest, venue })
+      .rpc({ skipPreflight: true });
+  } catch (err: any) {
+    // ER's "Unknown action 'undefined'" hides the underlying anchor error.
+    // Probe on-chain state to classify the failure.
+    const erGuest = await (erProgram as any).account.guestAccount
+      .fetchNullable(guest)
+      .catch(() => null);
+
+    // Known-benign cases: skip with a single-line warning, don't pollute the log.
+    if (erGuest === null) {
+      // Guest was never registered (pre-replay save data) or got swept away.
+      console.warn(
+        `[chain] spend skipped: guest ${guestId} not on ER (likely pre-migration); seq will retry on next entry`
+      );
+      return;
+    }
+    const bal = BigInt(erGuest.balance?.toString?.() ?? "0");
+    if (bal < amountUnits) {
+      // Game-side cash > on-chain balance (stale state from before the
+      // reactivate-with-balance fix, or guest drained in a busy session).
+      // Heals on next exit+re-entry. Don't throw.
+      console.warn(
+        `[chain] spend skipped: guest ${guestId} balance=${bal} < amount=${amountUnits} (venue=${venueId}); heals on re-entry`
+      );
+      return;
+    }
+    if (!erGuest.isActive) {
+      console.warn(
+        `[chain] spend skipped: guest ${guestId} is_active=false on ER (venue=${venueId})`
+      );
+      return;
+    }
+
+    // Unknown failure — keep the full diagnostic + rethrow so it surfaces.
+    const logs: string[] | undefined = err?.logs ?? err?.transactionLogs;
+    console.error(
+      `[chain] spend failed (guest=${guestId} venue=${venueId} amount=${amount} category=${category})`
+    );
+    if (logs?.length) {
+      console.error("[chain]   logs:");
+      for (const line of logs) console.error("[chain]    ", line);
+    } else {
+      console.error("[chain]   err:", err?.message ?? err);
+      console.error(
+        `[chain]   guest(ER): is_active=${erGuest.isActive} balance=${erGuest.balance?.toString?.()}`
+      );
+      const v = await (erProgram as any).account.venueAccount
+        .fetchNullable(venue)
+        .catch(() => null);
+      console.error(
+        `[chain]   venue(ER): ${
+          v ? `is_broken=${v.isBroken} revenue=${v.totalRevenue?.toString?.()}` : "MISSING"
+        }`
+      );
+    }
+    throw err;
+  }
 }
 
 export async function onGuestExit(guestId: number): Promise<void> {
