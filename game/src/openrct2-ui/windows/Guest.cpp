@@ -895,13 +895,17 @@ namespace OpenRCT2::Ui::Windows
                 DrawTextBasic(rt, { walletX, walletAddrY }, STR_STRING, ft, walletPaint);
             }
             {
-                // Balance is in TYCOON micro-units (1 TYCOON = 1_000_000 units).
-                // Show with two-decimal precision so small prizes are visible.
-                char balBuf[48];
+                // Balance with the inline TYCOON glyph (FmtString parses the
+                // {INLINE_SPRITE}{r}{g}{b}{a} bytes and draws the sprite).
+                char balBuf[96];
                 uint64_t bal = guestWallet.has_value() ? guestWallet->balance : 0;
                 uint64_t whole = bal / 1000000ull;
                 uint64_t frac = (bal % 1000000ull) / 10000ull;
-                snprintf(balBuf, sizeof(balBuf), "%llu.%02llu T",
+                const uint32_t gid = SPR_G2_TYCOON_GLYPH;
+                snprintf(balBuf, sizeof(balBuf),
+                         "{INLINE_SPRITE}{%u}{%u}{%u}{%u} %llu.%02llu",
+                         (gid >> 0) & 0xFFu, (gid >> 8) & 0xFFu,
+                         (gid >> 16) & 0xFFu, (gid >> 24) & 0xFFu,
                          static_cast<unsigned long long>(whole),
                          static_cast<unsigned long long>(frac));
                 auto ft = Formatter();

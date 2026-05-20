@@ -2647,13 +2647,17 @@ namespace OpenRCT2::Ui::Windows
                 snprintf(addrBuf, sizeof(addrBuf), "<offline>");
             }
 
-            char revBuf[64];
+            char revBuf[96];
             if (venueWallet.has_value())
             {
                 uint64_t rev = venueWallet->totalRevenue;
                 uint64_t whole = rev / 1000000ull;
                 uint64_t frac = (rev % 1000000ull) / 10000ull;
-                snprintf(revBuf, sizeof(revBuf), "%llu.%02llu T%s",
+                const uint32_t gid = SPR_G2_TYCOON_GLYPH;
+                snprintf(revBuf, sizeof(revBuf),
+                         "{INLINE_SPRITE}{%u}{%u}{%u}{%u} %llu.%02llu%s",
+                         (gid >> 0) & 0xFFu, (gid >> 8) & 0xFFu,
+                         (gid >> 16) & 0xFFu, (gid >> 24) & 0xFFu,
                          static_cast<unsigned long long>(whole),
                          static_cast<unsigned long long>(frac),
                          venueWallet->isBroken ? " (BROKEN)" : "");
