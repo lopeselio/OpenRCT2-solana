@@ -861,5 +861,8 @@
     },
     {
         "path": "icons/claude_toolbar_pressed.png"
+    },
+    {
+        "path": "icons/tycoon_glyph.png"
     }
 ]

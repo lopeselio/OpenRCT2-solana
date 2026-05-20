@@ -16,6 +16,7 @@
 #include "../core/UnitConversion.h"
 #include "../object/ObjectManager.h"
 #include "../object/PeepNamesObject.h"
+#include "../SpriteIds.h"
 #include "Currency.h"
 #include "FormatCodes.h"
 #include "Formatter.h"
@@ -416,6 +417,11 @@ namespace OpenRCT2
             value = (value + 99) / 100;
         }
 
+        // OpenRCT2 × Solana fork: render the TYCOON coin glyph inline instead
+        // of the text symbol when the custom currency is active (which it
+        // always is in this fork — see Config.cpp).
+        const bool useGlyph = Config::Get().general.currencyFormat == CurrencyType::custom;
+
         // Currency symbol
         auto symbol = currencyDesc->symbol_unicode;
         auto affix = currencyDesc->affix_unicode;
@@ -425,10 +431,23 @@ namespace OpenRCT2
             affix = currencyDesc->affix_ascii;
         }
 
+        auto writeGlyph = [&]() {
+            const uint32_t spriteId = SPR_G2_TYCOON_GLYPH;
+            char buf[64];
+            int len = snprintf(
+                buf, sizeof(buf), "{INLINE_SPRITE}{%u}{%u}{%u}{%u}",
+                (spriteId >> 0) & 0xFFu, (spriteId >> 8) & 0xFFu,
+                (spriteId >> 16) & 0xFFu, (spriteId >> 24) & 0xFFu);
+            ss.append(buf, static_cast<size_t>(len));
+        };
+
         // Currency symbol prefix
         if (affix == CurrencyAffix::prefix)
         {
-            ss << symbol;
+            if (useGlyph)
+                writeGlyph();
+            else
+                ss << symbol;
         }
 
         // Drop the pennies for "large" currencies
@@ -449,7 +468,10 @@ namespace OpenRCT2
         // Currency symbol suffix
         if (affix == CurrencyAffix::suffix)
         {
-            ss << symbol;
+            if (useGlyph)
+                writeGlyph();
+            else
+                ss << symbol;
         }
     }
 
