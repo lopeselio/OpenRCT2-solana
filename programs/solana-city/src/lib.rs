@@ -18,8 +18,12 @@ pub mod solana_city {
         city::initialize_city(ctx, park_id, name)
     }
 
-    pub fn update_park_score(ctx: Context<UpdateParkScore>, park_id: u32) -> Result<()> {
-        city::update_park_score(ctx, park_id)
+    pub fn update_park_score(
+        ctx: Context<UpdateParkScore>,
+        park_id: u32,
+        new_total_revenue: u64,
+    ) -> Result<()> {
+        city::update_park_score(ctx, park_id, new_total_revenue)
     }
 
     // ── Guest lifecycle ───────────────────────────────────────────────────

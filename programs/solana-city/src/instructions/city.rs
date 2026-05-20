@@ -23,15 +23,28 @@ pub fn initialize_city(ctx: Context<InitializeCity>, park_id: u32, name: String)
     Ok(())
 }
 
-// Called by the crank every 30s to recalculate park score from active state
-pub fn update_park_score(ctx: Context<UpdateParkScore>, _park_id: u32) -> Result<()> {
+// Called periodically to recalculate park score from active state.
+// The caller (sidecar) precomputes total_revenue by summing all ER-side venue
+// PDAs and passes it here, since spend() writes to venue.total_revenue on the
+// ER and never bubbles up to city.total_revenue on the base layer.
+pub fn update_park_score(
+    ctx: Context<UpdateParkScore>,
+    _park_id: u32,
+    new_total_revenue: u64,
+) -> Result<()> {
     let city = &mut ctx.accounts.city;
+    city.total_revenue = new_total_revenue;
 
     let guest_bonus = (city.active_guests as u32).min(200);
     let revenue_bonus = ((city.total_revenue / 1_000_000) as u32).min(300);
     city.park_score = (500 + guest_bonus + revenue_bonus).min(1000);
 
-    msg!("Park score updated to {}", city.park_score);
+    msg!(
+        "Park score updated to {} (guests={}, revenue={})",
+        city.park_score,
+        city.active_guests,
+        city.total_revenue
+    );
     Ok(())
 }
 
