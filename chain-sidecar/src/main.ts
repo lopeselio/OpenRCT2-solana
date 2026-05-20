@@ -22,8 +22,11 @@ import {
 } from "./solana/delegate";
 import { cityPda, parkMintPda, PARK_ID } from "./solana/accounts";
 import { ensureLeaderboardInitialized, tickScoreLoop } from "./solana/score";
+import { tickLottery } from "./solana/lottery";
+import { hydrateFromChain } from "./solana/runtime-state";
 
 const SCORE_TICK_MS = parseInt(process.env.SCORE_TICK_MS ?? "30000", 10);
+const LOTTERY_TICK_MS = parseInt(process.env.LOTTERY_TICK_MS ?? "60000", 10);
 
 const OUTBOX_PATH =
   process.env.OUTBOX_PATH ??
@@ -84,11 +87,25 @@ async function main() {
   await ensureParkMintInitialized(baseProgram);
   await ensureLeaderboardInitialized(baseProgram);
 
+  // Hydrate the in-memory active-guest + known-venue sets from on-chain state
+  // so the lottery has something to pick from immediately (existing guests
+  // delegated to ER won't emit new GUEST_ENTRY events through the outbox).
+  const hydrated = await hydrateFromChain(baseProgram);
+  console.log(
+    `[chain] Hydrated runtime state: ${hydrated.guests} active guests, ${hydrated.venues} venues`
+  );
+
   // Periodic park-score recompute + leaderboard submit. The sidecar sums
   // ER-side venue revenues each tick and passes the total to update_park_score
   // so city.park_score reflects real spending.
   setInterval(() => void tickScoreLoop(baseProgram, erProgram), SCORE_TICK_MS);
   console.log(`[chain] Score loop running every ${SCORE_TICK_MS}ms`);
+
+  // Park lottery: every LOTTERY_TICK_MS pick a random active guest + venue,
+  // fire a VRF request on the ER. consume_park_event stakes the result on the
+  // venue; apply_vrf_result is called during that guest's eventual exit.
+  setInterval(() => void tickLottery(erProgram), LOTTERY_TICK_MS);
+  console.log(`[chain] Lottery loop running every ${LOTTERY_TICK_MS}ms`);
 
   // Queue for sequential processing — prevents race conditions on the same PDA
   const eventQueue: OutboxEvent[] = [];
