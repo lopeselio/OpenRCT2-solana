@@ -67,6 +67,7 @@
 #include <openrct2/ride/TrackDesign.h>
 #include <openrct2/ride/TrackDesignRepository.h>
 #include <openrct2/ride/Vehicle.h>
+#include <openrct2/scripting/ChainStateCache.h>
 #include <openrct2/ui/WindowManager.h>
 #include <openrct2/util/Util.h>
 #include <openrct2/windows/Intent.h>
@@ -87,7 +88,9 @@ namespace OpenRCT2::Ui::Windows
     static constexpr int32_t kMinimumWindowWidth = 316;
 
     static constexpr StringId kWindowTitle = STR_RIDE_WINDOW_TITLE;
-    static constexpr ScreenSize kWindowSize = { kMinimumWindowWidth, 207 };
+    // Window height bumped by 22px to host the TYCOON venue wallet panel
+    // (PDA + revenue) above the status label on the main tab.
+    static constexpr ScreenSize kWindowSize = { kMinimumWindowWidth, 229 };
 
     enum
     {
@@ -2361,8 +2364,10 @@ namespace OpenRCT2::Ui::Windows
 
             const int32_t offset = gameState.cheats.allowArbitraryRideTypeChanges ? 15 : 0;
             // Anchor main page specific widgets
+            // Viewport ends above the wallet panel + status label (22px reserved
+            // for wallet, plus the original 14 for status — total 36).
             widgets[WIDX_VIEWPORT].right = width - 26;
-            widgets[WIDX_VIEWPORT].bottom = height - (14 + offset);
+            widgets[WIDX_VIEWPORT].bottom = height - (36 + offset);
             widgets[WIDX_STATUS].right = width - 26;
             widgets[WIDX_STATUS].top = height - (13 + offset);
             widgets[WIDX_STATUS].bottom = height - (3 + offset);
@@ -2620,6 +2625,65 @@ namespace OpenRCT2::Ui::Windows
             DrawTextEllipsised(
                 rt, windowPos + ScreenCoordsXY{ (widget->left + widget->right) / 2, widget->top }, widget->width(), rideStatus,
                 ft, { TextAlignment::centre });
+
+            // ── TYCOON venue wallet panel ───────────────────────────────────
+            // Snapshot is written by chain-sidecar to chain-state.json.
+            // Two lines above WIDX_STATUS:
+            //   line 1: truncated venue PDA address
+            //   line 2: total on-chain revenue (TYCOON) + " BROKEN" suffix
+            auto& chainCache = OpenRCT2::Scripting::ChainStateCache::Get();
+            const auto venueWallet = chainCache.GetVenue(rideId.ToUnderlying());
+            char addrBuf[64];
+            if (venueWallet.has_value() && !venueWallet->address.empty())
+            {
+                const auto& addr = venueWallet->address;
+                std::string truncated = addr.size() > 12
+                    ? addr.substr(0, 6) + "..." + addr.substr(addr.size() - 4)
+                    : addr;
+                snprintf(addrBuf, sizeof(addrBuf), "%s", truncated.c_str());
+            }
+            else
+            {
+                snprintf(addrBuf, sizeof(addrBuf), "<offline>");
+            }
+
+            char revBuf[64];
+            if (venueWallet.has_value())
+            {
+                uint64_t rev = venueWallet->totalRevenue;
+                uint64_t whole = rev / 1000000ull;
+                uint64_t frac = (rev % 1000000ull) / 10000ull;
+                snprintf(revBuf, sizeof(revBuf), "%llu.%02llu T%s",
+                         static_cast<unsigned long long>(whole),
+                         static_cast<unsigned long long>(frac),
+                         venueWallet->isBroken ? " (BROKEN)" : "");
+            }
+            else
+            {
+                snprintf(revBuf, sizeof(revBuf), "—");
+            }
+
+            TextPaint walletPaint;
+            walletPaint.FontStyle = FontStyle::small;
+            walletPaint.Alignment = TextAlignment::centre;
+
+            // Anchor relative to the (already-positioned) STATUS widget so we
+            // don't have to redo the cheat-mode offset arithmetic.
+            const auto& vp = widgets[WIDX_VIEWPORT];
+            int32_t walletX = windowPos.x + vp.midX();
+            int32_t walletRevY = windowPos.y + widgets[WIDX_STATUS].top - 10;
+            int32_t walletAddrY = windowPos.y + widgets[WIDX_STATUS].top - 20;
+
+            {
+                auto walletFt = Formatter();
+                walletFt.Add<const char*>(addrBuf);
+                DrawTextBasic(rt, { walletX, walletAddrY }, STR_STRING, walletFt, walletPaint);
+            }
+            {
+                auto walletFt = Formatter();
+                walletFt.Add<const char*>(revBuf);
+                DrawTextBasic(rt, { walletX, walletRevY }, STR_STRING, walletFt, walletPaint);
+            }
         }
 
 #pragma endregion

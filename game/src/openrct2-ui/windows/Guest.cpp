@@ -35,6 +35,7 @@
 #include <openrct2/object/ObjectManager.h>
 #include <openrct2/object/PeepAnimationsObject.h>
 #include <openrct2/peep/PeepSpriteIds.h>
+#include <openrct2/scripting/ChainStateCache.h>
 #include <openrct2/ride/RideData.h>
 #include <openrct2/ride/RideManager.hpp>
 #include <openrct2/ride/ShopItem.h>
@@ -50,7 +51,9 @@ using namespace OpenRCT2::Drawing;
 namespace OpenRCT2::Ui::Windows
 {
     static constexpr StringId kWindowTitle = STR_STRINGID;
-    static constexpr ScreenSize kWindowSize = { 192, 157 };
+    // Window extended by 22px to fit the TYCOON wallet panel
+    // (address + balance) below the standard overview content.
+    static constexpr ScreenSize kWindowSize = { 192, 179 };
 
     enum WindowGuestPage
     {
@@ -855,6 +858,56 @@ namespace OpenRCT2::Ui::Windows
                 PeepThoughtSetFormatArgs(&peep->Thoughts[i], ft);
                 DrawTextBasic(rtMarquee, { screenPos.x, 0 }, STR_WINDOW_COLOUR_2_STRINGID, ft, { FontStyle::small });
             }
+
+            // ── TYCOON wallet panel ─────────────────────────────────────────
+            // Snapshot is written by chain-sidecar to chain-state.json.
+            // Two lines below the viewport, above the action label:
+            //   line 1: truncated PDA address (e.g. "AF5D88Tt...8ysLKPK")
+            //   line 2: balance in TYCOON
+            auto& chainCache = Scripting::ChainStateCache::Get();
+            const auto guestWallet = chainCache.GetGuest(peep->Id.ToUnderlying());
+            char walletBuf[64];
+            if (guestWallet.has_value() && !guestWallet->address.empty())
+            {
+                const auto& addr = guestWallet->address;
+                std::string truncated = addr.size() > 12
+                    ? addr.substr(0, 6) + "..." + addr.substr(addr.size() - 4)
+                    : addr;
+                snprintf(walletBuf, sizeof(walletBuf), "%s", truncated.c_str());
+            }
+            else
+            {
+                snprintf(walletBuf, sizeof(walletBuf), "<offline>");
+            }
+
+            const auto& vp = widgets[WIDX_VIEWPORT];
+            int32_t walletX = windowPos.x + vp.midX();
+            int32_t walletAddrY = windowPos.y + height - 32;
+            int32_t walletBalY = windowPos.y + height - 22;
+
+            TextPaint walletPaint;
+            walletPaint.FontStyle = FontStyle::small;
+            walletPaint.Alignment = TextAlignment::centre;
+
+            {
+                auto ft = Formatter();
+                ft.Add<const char*>(walletBuf);
+                DrawTextBasic(rt, { walletX, walletAddrY }, STR_STRING, ft, walletPaint);
+            }
+            {
+                // Balance is in TYCOON micro-units (1 TYCOON = 1_000_000 units).
+                // Show with two-decimal precision so small prizes are visible.
+                char balBuf[48];
+                uint64_t bal = guestWallet.has_value() ? guestWallet->balance : 0;
+                uint64_t whole = bal / 1000000ull;
+                uint64_t frac = (bal % 1000000ull) / 10000ull;
+                snprintf(balBuf, sizeof(balBuf), "%llu.%02llu T",
+                         static_cast<unsigned long long>(whole),
+                         static_cast<unsigned long long>(frac));
+                auto ft = Formatter();
+                ft.Add<const char*>(balBuf);
+                DrawTextBasic(rt, { walletX, walletBalY }, STR_STRING, ft, walletPaint);
+            }
         }
 
         void onPrepareDrawOverview()
@@ -870,8 +923,9 @@ namespace OpenRCT2::Ui::Windows
                 pressedWidgets |= (1uLL << WIDX_TRACK);
             }
 
+            // Viewport must end above the wallet panel + action label.
             widgets[WIDX_VIEWPORT].right = width - 26;
-            widgets[WIDX_VIEWPORT].bottom = height - 14;
+            widgets[WIDX_VIEWPORT].bottom = height - 36;
 
             widgets[WIDX_ACTION_LBL].top = height - 12;
             widgets[WIDX_ACTION_LBL].bottom = height - 3;
