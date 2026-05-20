@@ -29,6 +29,23 @@ export async function tickLottery(erProgram: Program): Promise<void> {
 
   const [guest] = guestPda(guestId);
   const [venue] = venuePda(venueId);
+
+  // Don't fire if the chosen venue already has an unclaimed prize. Each venue
+  // has a single pending_prize slot — a new roll would overwrite whatever the
+  // previous lucky guest already won. Skip rather than displace.
+  try {
+    const venueAcc: any = await (erProgram.account as any).venueAccount.fetchNullable(venue);
+    if (venueAcc?.pendingPrize && BigInt(venueAcc.pendingPrize.toString()) > 0n) {
+      console.log(
+        `[lottery] venue ${venueId} busy (prize ${venueAcc.pendingPrize.toString()} ` +
+          `staged for guest ${venueAcc.pendingPrizeGuestId}) — skip`
+      );
+      return;
+    }
+  } catch {
+    // If the fetch fails, fall through and let the request proceed.
+  }
+
   const seed = Math.floor(Math.random() * 256);
 
   try {

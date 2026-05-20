@@ -279,17 +279,41 @@ export async function onGuestExit(guestId: number): Promise<void> {
     // stranded on the ER and the prize is effectively lost.
     const vrfVenueId = takePendingVrf(guestId);
     if (vrfVenueId !== undefined) {
+      const [venue] = venuePda(vrfVenueId);
+      // Pre-check: each venue has a single prize slot. If another guest's roll
+      // has overwritten ours, the on-chain constraint will reject the call —
+      // skip cleanly so the log isn't full of masked errors.
+      let canApply = false;
       try {
-        const [venue] = venuePda(vrfVenueId);
-        await erProgram.methods
-          .applyVrfResult(PARK_ID, guestId, vrfVenueId)
-          .accounts({ payer: erProvider.wallet.publicKey, guest, venue })
-          .rpc({ skipPreflight: true });
-        console.log(`[chain] VRF result applied for guest ${guestId} (venue=${vrfVenueId})`);
-      } catch (err: any) {
-        console.warn(
-          `[chain] apply_vrf_result failed for guest ${guestId}: ${err?.message ?? err}`
-        );
+        const venueAcc: any = await (erProgram.account as any).venueAccount.fetchNullable(venue);
+        if (venueAcc) {
+          const pending = BigInt(venueAcc.pendingPrize?.toString?.() ?? "0");
+          if (pending === 0n) {
+            console.log(`[chain] no VRF prize staged for guest ${guestId} (venue ${vrfVenueId} — roll was quiet or breakdown)`);
+          } else if (venueAcc.pendingPrizeGuestId !== guestId) {
+            console.log(
+              `[chain] VRF prize on venue ${vrfVenueId} displaced — currently held for guest ${venueAcc.pendingPrizeGuestId}, not ${guestId}`
+            );
+          } else {
+            canApply = true;
+          }
+        }
+      } catch {
+        canApply = true; // fall through and let the on-chain call surface the real error
+      }
+
+      if (canApply) {
+        try {
+          await erProgram.methods
+            .applyVrfResult(PARK_ID, guestId, vrfVenueId)
+            .accounts({ payer: erProvider.wallet.publicKey, guest, venue })
+            .rpc({ skipPreflight: true });
+          console.log(`[chain] VRF result applied for guest ${guestId} (venue=${vrfVenueId})`);
+        } catch (err: any) {
+          console.warn(
+            `[chain] apply_vrf_result failed for guest ${guestId}: ${err?.message ?? err}`
+          );
+        }
       }
     }
 
