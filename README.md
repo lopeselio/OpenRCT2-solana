@@ -406,6 +406,137 @@ cd game/build && ctest -R agent_scenarios
 
 ---
 
+## Demo Runbook
+
+Step-by-step for running the live demo end-to-end. Assumes you've already done
+the one-time setup (devnet wallet funded, $TYCOON mint + city + leaderboard
+initialised — these are no-ops on subsequent runs).
+
+### 1. Launch order
+
+Open two terminals + the game window. Order matters: sidecar should be running
+*before* the game starts emitting events, otherwise early events backlog in
+the NDJSON file.
+
+```bash
+# Terminal A — chain sidecar (event router + score loop + lottery + snapshot)
+cd chain-sidecar
+LOTTERY_TICK_MS=15000 npm run dev
+
+# Terminal B — open the game from the rebuilt bundle
+open game/build/OpenRCT2.app
+```
+
+What to verify in Terminal A within ~10 seconds of startup:
+
+```
+[chain] Park 1 already initialized on-chain
+[chain] $TYCOON mint already initialized
+[chain] Leaderboard already initialized: 8AqUe5DTaoCBzUZt5ZQLTdH6khBTcyPE8Veo7qk2uTxA
+[chain] Hydrated runtime state: NN active guests, M venues
+[chain] Score loop running every 30000ms
+[chain] Lottery loop running every 15000ms
+[chain] Snapshot writer attached
+[chain] Watching outbox...
+```
+
+### 2. What's visible in the game
+
+- **Title screen logo** (top-left of the title window): Solana × MagicBlock
+  composite, replacing the default OpenRCT2 lighthouse.
+- **Bottom-toolbar HUD line** (middle panel, top): `<operator>   [coin]
+  <revenue>   Score N   Rank #r / pop   Badges ****`. Live from
+  `chain-state.json`; refreshes every 30s.
+- **Any money number** (park value, ride prices, guest finance tab): renders
+  the inline TYCOON coin glyph instead of `£`.
+- **Guest detail window → first tab**: two extra lines below the action label
+  showing the guest's PDA address (truncated) + on-chain balance.
+- **Ride detail window → first tab**: two extra lines above the status row
+  showing the venue PDA address + on-chain revenue + `BROKEN` flag when
+  applicable.
+
+### 3. What to point at in the sidecar log
+
+Per-event lines you can highlight live:
+
+| Log line | What's happening |
+|---|---|
+| `Registering guest 71 in park 1 (60.000000 TYCOON)...` | `register_guest` ix on base — new PDA created |
+| `Guest 71 delegated to ER` | `delegate_guest` — PDA now lives on MagicBlock ER |
+| `Guest 71 exists on base — reactivating + re-delegating...` | Returning guest, balance reset to fresh pocket cash |
+| `[lottery] VRF requested: guest=X venue=Y seed=Z (active=N)` | `request_park_event` ix on ER, oracle callback pending |
+| `[chain] VRF result applied for guest X (venue=Y)` | Staged prize transferred from venue to guest before exit |
+| `[score] park_score=889 active_guests=89 revenue=437100000 rank=#1/1` | `update_park_score` + `submit_score` round-trip |
+| `[badge] Claimed tier 0 (Bronze) — 173 total guests` | Auto-claim crossed threshold |
+| `Guest 71 redeemed 70000000 $TYCOON` | `redeem_balance` — SPL mint on exit |
+
+### 4. On-chain verification
+
+Open these in a devnet explorer (Solscan or solana.fm; switch network to
+devnet):
+
+- **Program ID**: `2ce1z7iFfMB6BHzaWvT5jqhsDsS6jeEjvymGYwrb8wDn`
+- **$TYCOON mint**: derived from `parkMintPda()` — visible in the snapshot
+  JSON or copy from the game's About dialog
+- **Leaderboard PDA**: `8AqUe5DTaoCBzUZt5ZQLTdH6khBTcyPE8Veo7qk2uTxA`
+- **Operator wallet**: `HDDYb8NAzwMVuobJJD4UCYzeFNgSawJ2vJhPMfFLBiLB` — you
+  can show its tx history scrolling in real time as the sidecar fires events.
+- **Any guest PDA**: open a guest in the game, copy the truncated address
+  shown in the wallet panel; paste the full base58 (visible in
+  `chain-state.json`) into the explorer to inspect the account data
+  (balance, total_spent, is_active, ...).
+
+### 5. Staking demo (off the main loop)
+
+The staking architecture works on a dedicated phantom venue (id=999) that
+isn't delegated to the ER. The flow is exercised via the one-shot script:
+
+```bash
+cd chain-sidecar
+npm run stake-demo            # registers venue 999, creates vault, stakes 0.05 SOL
+npm run stake-demo -- status  # prints vault + position state
+npm run stake-demo -- claim   # mints any accumulated TYCOON rewards
+npm run stake-demo -- unstake # withdraws all staked SOL + claims rewards
+```
+
+Each command prints the resulting on-chain state so you can show the vault
+PDA / position PDA / lamport balances changing in real time.
+
+(Staking on a *delegated* venue would require redesigning the staking ixs to
+operate on the ER side, since the current `Account<'info, VenueAccount>`
+constraint requires program-ownership. The phantom-venue path demonstrates
+the architecture without that rewrite.)
+
+### 6. VRF lottery moment
+
+The lottery fires every `LOTTERY_TICK_MS` (default 60s; set to 15000 for the
+demo). To verify the oracle is actually rolling, in a third terminal:
+
+```bash
+cd chain-sidecar && npx ts-node -e "
+import { Connection, PublicKey } from '@solana/web3.js';
+const c = new Connection(process.env.EPHEMERAL_PROVIDER_ENDPOINT, 'confirmed');
+const p = new PublicKey('2ce1z7iFfMB6BHzaWvT5jqhsDsS6jeEjvymGYwrb8wDn');
+(async () => {
+  const sigs = await c.getSignaturesForAddress(p, { limit: 30 });
+  for (const s of sigs.reverse()) {
+    const tx = await c.getTransaction(s.signature, { maxSupportedTransactionVersion: 0 });
+    const logs = tx?.meta?.logMessages?.filter(l => l.includes('RANDOM EVENT'));
+    if (logs?.length) for (const l of logs) console.log(l.replace(/^Program log: /, ''));
+  }
+})();
+"
+```
+
+Expect lines like:
+```
+RANDOM EVENT: Quiet moment. (roll=37)
+RANDOM EVENT: Venue 1 broke down! (roll=14)
+RANDOM EVENT: Guest 64 wins 430284 PARK! (roll=73) — staged in venue
+```
+
+---
+
 ## Roadmap
 
 See [FEATURES.md](./FEATURES.md) for the prioritized feature list.
