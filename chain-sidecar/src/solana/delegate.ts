@@ -17,6 +17,12 @@ import {
   wallet,
 } from "./clients";
 import { cityPda, guestPda, venuePda, PROGRAM_ID, PARK_ID } from "./accounts";
+import {
+  markGuestActive,
+  markGuestInactive,
+  markVenueKnown,
+  takePendingVrf,
+} from "./runtime-state";
 
 // State of a PDA between base layer and the ER, used to make entry/exit
 // reconcile against on-chain reality instead of replaying blindly.
@@ -132,6 +138,7 @@ export async function onGuestEntry(
   switch (state) {
     case "delegated":
       console.log(`[chain] Guest ${guestId} already delegated to ER — skip`);
+      markGuestActive(guestId);
       return;
 
     case "base": {
@@ -150,6 +157,7 @@ export async function onGuestEntry(
         .rpc({ skipPreflight: false, commitment: "confirmed" });
       await sleep(3000);
       console.log(`[chain] Guest ${guestId} reactivated + delegated to ER`);
+      markGuestActive(guestId);
       return;
     }
 
@@ -165,6 +173,7 @@ export async function onGuestEntry(
         .rpc({ skipPreflight: false, commitment: "confirmed" });
       await sleep(3000);
       console.log(`[chain] Guest ${guestId} delegated to ER`);
+      markGuestActive(guestId);
       return;
     }
 
@@ -265,6 +274,25 @@ export async function onGuestExit(guestId: number): Promise<void> {
   }
 
   if (state === "delegated") {
+    // If a VRF event was requested for this guest, settle the staged prize
+    // BEFORE commit_and_undelegate — otherwise venue.pending_prize stays
+    // stranded on the ER and the prize is effectively lost.
+    const vrfVenueId = takePendingVrf(guestId);
+    if (vrfVenueId !== undefined) {
+      try {
+        const [venue] = venuePda(vrfVenueId);
+        await erProgram.methods
+          .applyVrfResult(PARK_ID, guestId, vrfVenueId)
+          .accounts({ payer: erProvider.wallet.publicKey, guest, venue })
+          .rpc({ skipPreflight: true });
+        console.log(`[chain] VRF result applied for guest ${guestId} (venue=${vrfVenueId})`);
+      } catch (err: any) {
+        console.warn(
+          `[chain] apply_vrf_result failed for guest ${guestId}: ${err?.message ?? err}`
+        );
+      }
+    }
+
     console.log(`[chain] Guest ${guestId} exiting park ${PARK_ID} — committing + undelegating...`);
     const tx = await erProgram.methods
       .exitGuest()
@@ -296,6 +324,7 @@ export async function onGuestExit(guestId: number): Promise<void> {
   }
 
   console.log(`[chain] Guest ${guestId} fully exited park ${PARK_ID}`);
+  markGuestInactive(guestId);
 }
 
 // ─── Venue Operations ───────────────────────────────────────────────────────
@@ -311,6 +340,7 @@ export async function onVenueRegistered(
   switch (state) {
     case "delegated":
       console.log(`[chain] Venue ${venueId} already delegated to ER — skip`);
+      markVenueKnown(venueId);
       return;
 
     case "base":
@@ -321,6 +351,7 @@ export async function onVenueRegistered(
         .rpc({ commitment: "confirmed" });
       await sleep(3000);
       console.log(`[chain] Venue ${venueId} re-delegated to ER`);
+      markVenueKnown(venueId);
       return;
 
     case "missing":
@@ -335,6 +366,7 @@ export async function onVenueRegistered(
         .rpc({ commitment: "confirmed" });
       await sleep(3000);
       console.log(`[chain] Venue ${venueId} delegated to ER`);
+      markVenueKnown(venueId);
       return;
 
     case "foreign":
