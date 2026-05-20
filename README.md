@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/logo.png" alt="OpenRCT2 × Solana" width="320" />
+</p>
+
 # OpenRCT2 × Solana City
 
 A Solana on-chain layer for a fork of [OpenRCT2](https://github.com/jaysobel/OpenRCT2)
