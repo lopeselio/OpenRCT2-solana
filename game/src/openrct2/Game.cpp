@@ -33,6 +33,7 @@
 #include "core/String.hpp"
 #include "entity/EntityList.h"
 #include "entity/EntityRegistry.h"
+#include "entity/Guest.h"
 #include "scripting/ChainOutbox.h"
 #include "entity/PatrolArea.h"
 #include "entity/Peep.h"
@@ -52,6 +53,8 @@
 #include "platform/Platform.h"
 #include "rct12/CSStringConverter.h"
 #include "ride/Ride.h"
+#include "ride/RideData.h"
+#include "ride/RideManager.hpp"
 #include "ride/RideRatings.h"
 #include "ride/Station.h"
 #include "ride/Track.h"
@@ -362,6 +365,34 @@ void GameLoadInit()
         context->GetPlatformEnvironment().GetDirectoryPath(DirBase::user),
         u8"chain-outbox.ndjson");
     OpenRCT2::Scripting::ChainOutbox::Get().Open(outboxPath);
+
+    // Replay VENUE_REGISTERED for every ride present at load time. RideCreateAction only
+    // emits for newly placed rides, so rides loaded from a save file would otherwise
+    // never appear on-chain. Sidecar's onVenueRegistered is idempotent.
+    {
+        auto& loadedState = getGameState();
+        for (const auto& ride : RideManager(loadedState))
+        {
+            OpenRCT2::Scripting::ChainOutbox::Get().EmitVenueRegistered(
+                static_cast<int32_t>(ride.id.ToUnderlying()),
+                static_cast<int32_t>(GetRideTypeDescriptor(ride.type).Category),
+                ride.getName(),
+                "ride");
+        }
+    }
+
+    // Replay GUEST_ENTRY for every guest already inside the park at load time.
+    // Guests transitioning through the entrance emit naturally; save-loaded guests
+    // already inside would otherwise never get registered on-chain and any spends
+    // they make would target a missing PDA. Sidecar's onGuestEntry is idempotent.
+    for (auto* peep : EntityList<Guest>())
+    {
+        if (peep == nullptr || peep->OutsideOfPark)
+            continue;
+        OpenRCT2::Scripting::ChainOutbox::Get().EmitGuestEntry(
+            static_cast<int32_t>(peep->Id.ToUnderlying()),
+            static_cast<double>(peep->CashInPocket) / 10.0);
+    }
 
     IGameStateSnapshots* snapshots = context->GetGameStateSnapshots();
     snapshots->Reset();
