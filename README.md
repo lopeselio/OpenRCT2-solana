@@ -165,6 +165,81 @@ Guest and venue accounts are created on the base layer, then **delegated to
 the ER** for fast gameplay (`spend`, VRF, crank). Periodic `commit_*` syncs
 flush state back to devnet; `exit_*` undelegates and returns final state.
 
+### How a guest becomes an on-chain account
+
+Walking through what happens the first time a single guest pays admission and
+enters the park, all the way to a live ER-side balance:
+
+1. **In-game trigger.** When a guest transitions from "outside" to "inside
+   park", C++ calls
+   `OpenRCT2::Scripting::ChainOutbox::Get().EmitGuestEntry(guestId, cashInPocket / 10.0)`
+   in `game/src/openrct2/entity/Guest.cpp` (`Guest::UpdateEnteringPark`).
+
+2. **Outbox event.** That writes one line of NDJSON to
+   `~/Library/Application Support/OpenRCT2/chain-outbox.ndjson`:
+
+   ```json
+   {"kind":"GUEST_ENTRY","seq":42,"ts":1779270440067,"guestId":71,"cash":"60.000000"}
+   ```
+
+   The file is append-only and never blocks the game loop.
+
+3. **Sidecar dispatch.** The Node.js sidecar tails the outbox and routes the
+   event to `onGuestEntry` in `chain-sidecar/src/solana/delegate.ts`.
+
+4. **PDA derivation & status check.** The sidecar computes the deterministic
+   address `findProgramAddress([b"guest", park_id_le, guest_id_le], PROGRAM_ID)`
+   and queries the chain to see if it already exists. Three branches:
+
+   - **`missing`** — calls `register_guest(park_id, guest_id, initial_balance)`
+     on the Anchor program. That `init`s a `GuestAccount` PDA on base, paid for
+     by the sidecar's wallet. Then calls `delegate_guest` to move it to
+     MagicBlock's ER.
+   - **`base`** — guest exited before and the PDA is back on base. Calls
+     `reactivate_guest` (resets balance to fresh pocket cash, flips
+     `is_active=true`), then re-delegates to ER.
+   - **`delegated`** — already on ER, no-op.
+
+5. **PDA address = "wallet".** The PDA address is what we display as the
+   guest's wallet — base58-encoded `findProgramAddress(...)` result. It's NOT a
+   real Ed25519 keypair, it's a deterministic program-derived address. The
+   in-game Guest detail window (overview tab) shows the truncated address +
+   balance from the chain-state snapshot.
+
+6. **Who pays.** The sidecar's hot wallet
+   (`HDDYb8NAzwMVuobJJD4UCYzeFNgSawJ2vJhPMfFLBiLB`) is the `payer` and signer
+   for ALL guest creation. Guests don't have wallets of their own. The chain
+   treats the entire park as operator-owned state. (See the
+   [Who pays / EIP-712](#who-pays--session-keys--eip-712-analog) note below
+   for the equivalent of Ethereum's session-key / EIP-712 abstractions.)
+
+7. **Balance updates.** While delegated to the ER, every `GUEST_SPEND` event
+   triggers `spend(park_id, guest_id, venue_id, amount, category)` on the ER,
+   which decrements `guest.balance` and bumps `venue.total_revenue`. That live
+   ER state is what `chain-state.json` reads (via `erProgram.fetchMultiple`),
+   and what the in-game wallet panels display.
+
+8. **Exit + redemption.** When a guest leaves the park, the sidecar calls
+   `exit_guest` (commit + undelegate from ER), then `claim_prize` (settles any
+   VRF prize, flips `is_active=false`), then `redeem_balance` — which mints
+   real `$TYCOON` SPL tokens worth the remaining balance to the operator's ATA
+   and zeros the PDA's internal balance.
+
+**Cost per guest lifecycle:**
+
+| Step | Where | Cost (devnet lamports) |
+|------|-------|------------------------|
+| `register_guest` (init PDA) | base | ~7,000 |
+| `delegate_guest` | base | ~5,000 |
+| `spend` × N (during visit) | ER | ~free per tx |
+| `exit_guest` (commit + undelegate) | ER | ~5,000 |
+| `claim_prize` | base | ~5,000 |
+| `redeem_balance` (SPL mint) | base | ~5,000 |
+
+Re-entries are cheaper (just `reactivate_guest` + `delegate_guest` ≈ 10,000
+lamports). On Solana mainnet at typical fees, an entire visit costs less than
+$0.001 per guest.
+
 ### Source tree
 
 ```
@@ -220,6 +295,30 @@ openrct-solana/
 | `badges` | `claim_badge` |
 | `vrf` | `request_park_event`, `consume_park_event`, `apply_vrf_result` |
 | `crank` | `schedule_park_crank`, `auto_park_tick` |
+
+### Who pays / session keys / EIP-712 analog
+
+A common question is "where do per-guest signatures fit?". The short answer:
+**there are none today** — the entire park is operator-owned state. The
+sidecar's hot wallet is the unconditional `payer` and signer for every
+instruction. Mapping to Ethereum mental models:
+
+| Ethereum concept | Solana equivalent in this project |
+|---|---|
+| User wallet signs every action | Operator wallet signs every action (no per-guest signing) |
+| `eth_sign` / `personal_sign` raw bytes | `signMessage` via Solana Wallet Standard (unused here) |
+| **EIP-712 typed structured data** | No canonical Solana equivalent. Closest: Ed25519 signature verified via `Ed25519SigVerify` syscall (no struct typing, no domain separator) |
+| Meta-transactions / gasless relays | Durable nonces + separate fee-payer; both signatures in one tx |
+| Permit / approve pattern | PDA delegation + Anchor `constraint = ...` checks |
+| **Session keys** (ERC-4337 etc.) | [MagicBlock session keys SDK](https://docs.magicblock.gg/), Gum SDK, or hand-rolled PDA-as-signer with expiry. Not yet wired into this fork |
+
+To make guests truly player-owned (e.g. for a public/multiplayer version)
+would require three changes: (1) Phantom or Backpack wallet integration in
+the game UI, (2) per-guest `owner: Pubkey` on `GuestAccount` enforced via
+`has_one`, (3) a session-key delegation so the sidecar can submit spends
+without the player having to sign each one. For the current single-player
+demo, the operator-pays model is the right scope — the showcase is "how
+cheap and fast MagicBlock ER is", not "how easy player onboarding is".
 
 ---
 
