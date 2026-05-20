@@ -168,12 +168,19 @@ namespace OpenRCT2::Config
             model->autosaveFrequency = reader->GetInt32("autosave", AUTOSAVE_EVERY_5MINUTES);
             model->autosaveAmount = reader->GetInt32("autosave_amount", kDefaultNumAutosavesToKeep);
             model->confirmationPrompt = reader->GetBoolean("confirmation_prompt", false);
-            model->currencyFormat = reader->GetEnum<CurrencyType>(
+            // OpenRCT2 × Solana fork: currency is always TYCOON. We discard any
+            // saved currency_format and force the custom currency to render as
+            // "T " prefix. The customCurrencyRate stays at 10 (1 TYCOON = 10
+            // in-game money units) so prices in scenarios still make sense.
+            (void)reader->GetEnum<CurrencyType>(
                 "currency_format", Platform::GetLocaleCurrency(), Enum_Currency);
+            model->currencyFormat = CurrencyType::custom;
             model->customCurrencyRate = reader->GetInt32("custom_currency_rate", 10);
-            model->customCurrencyAffix = reader->GetEnum<CurrencyAffix>(
+            (void)reader->GetEnum<CurrencyAffix>(
                 "custom_currency_affix", CurrencyAffix::suffix, Enum_CurrencySymbolAffix);
-            model->customCurrencySymbol = reader->GetString("custom_currency_symbol", "Ctm");
+            model->customCurrencyAffix = CurrencyAffix::prefix;
+            (void)reader->GetString("custom_currency_symbol", "Ctm");
+            model->customCurrencySymbol = "T ";
             model->edgeScrolling = reader->GetBoolean("edge_scrolling", true);
             model->edgeScrollingSpeed = reader->GetInt32("edge_scrolling_speed", 12);
             model->fullscreenMode = reader->GetInt32("fullscreen_mode", 0);
