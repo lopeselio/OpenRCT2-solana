@@ -85,6 +85,7 @@ namespace OpenRCT2::Scripting
                 c.totalRevenue = ParseU64String(cj["total_revenue"]);
                 c.rank = 0;
                 c.populated = 0;
+                c.badges.clear();
 
                 // Compute our rank from the leaderboard array (sorted desc by revenue).
                 if (root["leaderboard"].is_array())
@@ -98,6 +99,13 @@ namespace OpenRCT2::Scripting
                             c.populated++;
                         if (entryAddr == c.address)
                             c.rank = idx;
+                    }
+                }
+                if (cj["badges"].is_array())
+                {
+                    for (auto& tier : cj["badges"])
+                    {
+                        c.badges.push_back(Json::GetNumber<uint8_t>(tier));
                     }
                 }
                 _city = c;

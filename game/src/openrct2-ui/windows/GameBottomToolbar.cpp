@@ -680,21 +680,40 @@ namespace OpenRCT2::Ui::Windows
             else
                 opShort = opAddr;
 
-            char buf[256];
+            char buf[512];
             if (cityOpt.has_value())
             {
                 const auto& c = *cityOpt;
                 const uint32_t gid = SPR_G2_TYCOON_GLYPH;
-                // Use {INLINE_SPRITE} so the coin renders inline with the line.
+                // Render claimed badges as filled stars, unclaimed as outline.
+                // 4 slots total (Bronze / Silver / Gold / Diamond).
+                char badgeBuf[16];
+                {
+                    char* p = badgeBuf;
+                    for (uint8_t tier = 0; tier < 4; tier++)
+                    {
+                        bool claimed = false;
+                        for (auto t : c.badges)
+                            if (t == tier)
+                            {
+                                claimed = true;
+                                break;
+                            }
+                        *p++ = claimed ? '*' : '.';
+                    }
+                    *p = '\0';
+                }
                 snprintf(
                     buf, sizeof(buf),
-                    "{WHITE}{OUTLINE}%s   {INLINE_SPRITE}{%u}{%u}{%u}{%u} %llu.%02llu   Score %u   Rank #%d / %u",
+                    "{WHITE}{OUTLINE}%s   {INLINE_SPRITE}{%u}{%u}{%u}{%u} %llu.%02llu   "
+                    "Score %u   Rank #%d / %u   Badges %s",
                     opShort.c_str(),
                     (gid >> 0) & 0xFFu, (gid >> 8) & 0xFFu,
                     (gid >> 16) & 0xFFu, (gid >> 24) & 0xFFu,
                     static_cast<unsigned long long>(c.totalRevenue / 1000000ull),
                     static_cast<unsigned long long>((c.totalRevenue % 1000000ull) / 10000ull),
-                    static_cast<unsigned>(c.parkScore), c.rank, static_cast<unsigned>(c.populated));
+                    static_cast<unsigned>(c.parkScore), c.rank,
+                    static_cast<unsigned>(c.populated), badgeBuf);
             }
             else
             {

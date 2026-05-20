@@ -42,6 +42,8 @@ namespace OpenRCT2::Scripting
         int32_t rank;
         // Number of populated leaderboard slots.
         uint32_t populated;
+        // Claimed milestone badge tiers (0=Bronze .. 3=Diamond).
+        std::vector<uint8_t> badges;
     };
 
     class ChainStateCache
