@@ -30,25 +30,27 @@ pub fn register_guest(
 }
 
 // Re-entry on an existing guest PDA — base layer.
-// Asserts the guest is currently inactive (cleanly exited previously),
-// flips is_active back on, bumps active_guests, and refreshes entry_time.
-// Balance and total_spent carry over from the prior visit by design.
+// Idempotent: if the guest is already active, only the balance + entry_time refresh.
+// Balance is always reset to `new_balance` (the fresh pocket cash the guest walked
+// in with). total_spent carries over across visits.
 pub fn reactivate_guest(
     ctx: Context<ReactivateGuest>,
     _park_id: u32,
     _guest_id: u32,
+    new_balance: u64,
 ) -> Result<()> {
     let guest = &mut ctx.accounts.guest;
-    require!(!guest.is_active, CityError::GuestAlreadyActive);
+    let city = &mut ctx.accounts.city;
 
-    guest.is_active = true;
+    if !guest.is_active {
+        guest.is_active = true;
+        city.active_guests = city.active_guests.checked_add(1).unwrap();
+    }
+    guest.balance = new_balance;
     guest.entry_time = Clock::get()?.unix_timestamp;
 
-    let city = &mut ctx.accounts.city;
-    city.active_guests += 1;
-
     msg!(
-        "Guest {} re-entered park {} with carry-over balance {}",
+        "Guest {} re-entered park {} with balance {}",
         guest.guest_id,
         _park_id,
         guest.balance

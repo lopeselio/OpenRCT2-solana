@@ -32,8 +32,13 @@ pub mod solana_city {
     }
 
     // Re-entry on an existing guest PDA — base layer
-    pub fn reactivate_guest(ctx: Context<ReactivateGuest>, park_id: u32, guest_id: u32) -> Result<()> {
-        guest::reactivate_guest(ctx, park_id, guest_id)
+    pub fn reactivate_guest(
+        ctx: Context<ReactivateGuest>,
+        park_id: u32,
+        guest_id: u32,
+        new_balance: u64,
+    ) -> Result<()> {
+        guest::reactivate_guest(ctx, park_id, guest_id, new_balance)
     }
 
     // ER: guest pays at a venue
