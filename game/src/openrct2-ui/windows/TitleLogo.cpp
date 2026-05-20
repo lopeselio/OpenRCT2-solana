@@ -17,7 +17,11 @@
 
 namespace OpenRCT2::Ui::Windows
 {
-    static constexpr ScreenSize kWindowSize = { 232, 136 };
+    // OpenRCT2 × Solana fork: shrink the title-logo window to the new
+    // composite logo's native 128x128 dimensions. The old layout left a
+    // 128px-wide gap on the right for the separate "Open RCT2" wordmark
+    // sprite (which we replaced with a transparent placeholder).
+    static constexpr ScreenSize kWindowSize = { 128, 128 };
 
     enum
     {
@@ -59,9 +63,10 @@ namespace OpenRCT2::Ui::Windows
          */
         void onDraw(RenderTarget& rt) override
         {
-            auto screenCoords = windowPos + ScreenCoordsXY{ 2, 2 };
+            // Solana fork: single composite logo fills the whole 128x128
+            // window — no separate wordmark draw.
+            auto screenCoords = windowPos + ScreenCoordsXY{ 0, 0 };
             GfxDrawSprite(rt, ImageId(SPR_G2_LOGO), screenCoords);
-            GfxDrawSprite(rt, ImageId(SPR_G2_TITLE), screenCoords + ScreenCoordsXY{ 104, 18 });
         }
     };
 
