@@ -41,4 +41,8 @@ export function parkMintPda(): [PublicKey, number] {
   return PublicKey.findProgramAddressSync([Buffer.from("park_mint")], PROGRAM_ID);
 }
 
+export function leaderboardPda(): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync([Buffer.from("leaderboard")], PROGRAM_ID);
+}
+
 export { PROGRAM_ID };

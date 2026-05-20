@@ -10,7 +10,7 @@ import * as fs from "fs";
 import { Program } from "@coral-xyz/anchor";
 import { followOutbox } from "./outbox/reader";
 import { OutboxEvent, EventKind } from "./outbox/types";
-import { baseProvider, signer } from "./solana/clients";
+import { baseProvider, erProvider, signer } from "./solana/clients";
 import {
   initPrograms,
   onGuestEntry,
@@ -21,6 +21,9 @@ import {
   onVenueRemoved,
 } from "./solana/delegate";
 import { cityPda, parkMintPda, PARK_ID } from "./solana/accounts";
+import { ensureLeaderboardInitialized, tickScoreLoop } from "./solana/score";
+
+const SCORE_TICK_MS = parseInt(process.env.SCORE_TICK_MS ?? "30000", 10);
 
 const OUTBOX_PATH =
   process.env.OUTBOX_PATH ??
@@ -76,8 +79,16 @@ async function main() {
 
   // baseProgram for setup checks only — delegate.ts owns the program instances
   const baseProgram = new Program(idl, baseProvider);
+  const erProgram = new Program(idl, erProvider);
   await ensureCityInitialized(baseProgram);
   await ensureParkMintInitialized(baseProgram);
+  await ensureLeaderboardInitialized(baseProgram);
+
+  // Periodic park-score recompute + leaderboard submit. The sidecar sums
+  // ER-side venue revenues each tick and passes the total to update_park_score
+  // so city.park_score reflects real spending.
+  setInterval(() => void tickScoreLoop(baseProgram, erProgram), SCORE_TICK_MS);
+  console.log(`[chain] Score loop running every ${SCORE_TICK_MS}ms`);
 
   // Queue for sequential processing — prevents race conditions on the same PDA
   const eventQueue: OutboxEvent[] = [];
